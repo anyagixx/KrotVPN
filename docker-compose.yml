@@ -17,13 +17,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - krotvpn-network
 
   # Redis Cache
   redis:
     image: redis:7-alpine
     container_name: krotvpn-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
@@ -31,6 +33,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - krotvpn-network
 
   # Backend API
   backend:
@@ -44,30 +48,27 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${DB_USER:-krotvpn}:${DB_PASSWORD:-krotvpn_secret}@db:5432/${DB_NAME:-krotvpn}
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
-      - DEBUG=${DEBUG:-false}
-      - ENVIRONMENT=${ENVIRONMENT:-production}
-      - CORS_ORIGINS=["https://${DOMAIN:-localhost}"]
-      - YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID:-}
-      - YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY:-}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
     volumes:
-      - ./backend/logs:/app/logs
-      - /etc/amnezia/amneziawg:/etc/amnezia/amneziawg:ro
+      - ./logs:/app/logs
+      - /etc/amnezia/amneziawg:/etc/amnezia/amneziawg
     ports:
       - "8000:8000"
-    cap_add:
-      - NET_ADMIN
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - krotvpn-network
 
-  # Frontend
+  # Frontend User Dashboard
   frontend:
     build:
       context: ./frontend
@@ -78,11 +79,24 @@ services:
       - backend
     ports:
       - "80:80"
-      - "443:443"
-    volumes:
-      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - krotvpn-network
 
-  # Telegram Bot (optional)
+  # Admin Panel
+  frontend-admin:
+    build:
+      context: ./frontend-admin
+      dockerfile: Dockerfile
+    container_name: krotvpn-admin
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    networks:
+      - krotvpn-network
+
+  # Telegram Bot (optional - enable with --profile telegram)
   telegram-bot:
     build:
       context: ./telegram-bot
@@ -91,9 +105,12 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    env_file:
+      - .env
     environment:
       - BACKEND_URL=http://backend:8000
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+    networks:
+      - krotvpn-network
     profiles:
       - telegram
 
@@ -102,5 +119,5 @@ volumes:
   redis_data:
 
 networks:
-  default:
-    name: krotvpn-network
+  krotvpn-network:
+    driver: bridge

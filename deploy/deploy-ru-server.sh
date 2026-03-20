@@ -1,0 +1,449 @@
+#!/bin/bash
+#
+# KrotVPN RU Server (Entry Node) Deployment Script
+# Run this script on the Russian server AFTER setting up DE server
+#
+# Usage: bash deploy-ru-server.sh
+#
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Configuration
+RU_IP="212.113.121.164"
+DE_IP="95.216.149.110"
+VPN_PORT="51821"
+CLIENT_VPN_SUBNET="10.10.0.0/24"
+TUNNEL_SUBNET="10.200.0.0/24"
+
+echo -e "${BLUE}================================================${NC}"
+echo -e "${BLUE}   KrotVPN RU Server (Entry Node) Deployment    ${NC}"
+echo -e "${BLUE}================================================${NC}"
+echo ""
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}Please run as root${NC}"
+    exit 1
+fi
+
+# Step 1: Update system
+echo -e "${YELLOW}[1/10] Updating system...${NC}"
+apt update && apt upgrade -y
+
+# Step 2: Install Docker
+echo -e "${YELLOW}[2/10] Installing Docker...${NC}"
+if ! command -v docker &> /dev/null; then
+    curl -fsSL https://get.docker.com | sh
+    usermod -aG docker $USER
+fi
+
+# Install Docker Compose
+if ! command -v docker-compose &> /dev/null; then
+    apt install -y docker-compose-plugin
+fi
+
+# Step 3: Install dependencies
+echo -e "${YELLOW}[3/10] Installing dependencies...${NC}"
+apt install -y software-properties-common python3-launchpadlib gnupg2 \
+    linux-headers-$(uname -r) curl wget git ipset iptables ufw qrencode \
+    python3-pip python3-cryptography
+
+# Step 4: Install AmneziaWG
+echo -e "${YELLOW}[4/10] Installing AmneziaWG...${NC}"
+if ! command -v awg &> /dev/null; then
+    add-apt-repository ppa:amnezia/ppa -y
+    apt update
+    apt install -y amneziawg amneziawg-tools
+fi
+
+# Step 5: Enable IP forwarding
+echo -e "${YELLOW}[5/10] Enabling IP forwarding...${NC}"
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-krotvpn.conf
+sysctl -p /etc/sysctl.d/99-krotvpn.conf
+
+# Step 6: Generate keys
+echo -e "${YELLOW}[6/10] Generating AmneziaWG keys...${NC}"
+mkdir -p /etc/amnezia/amneziawg
+cd /etc/amnezia/amneziawg
+
+# Generate server keys (for VPN clients)
+awg genkey | tee ru_server_private.key | awg pubkey > ru_server_public.key
+
+# Generate client keys (for tunnel to DE)
+awg genkey | tee ru_client_private.key | awg pubkey > ru_client_public.key
+
+RU_SERVER_PRIVATE_KEY=$(cat ru_server_private.key)
+RU_SERVER_PUBLIC_KEY=$(cat ru_server_public.key)
+RU_CLIENT_PRIVATE_KEY=$(cat ru_client_private.key)
+RU_CLIENT_PUBLIC_KEY=$(cat ru_client_public.key)
+
+echo -e "${GREEN}RU Server Keys Generated:${NC}"
+echo -e "  Server Private: ${RU_SERVER_PRIVATE_KEY}"
+echo -e "  Server Public:  ${RU_SERVER_PUBLIC_KEY}"
+echo -e "  Client Private: ${RU_CLIENT_PRIVATE_KEY}"
+echo -e "  Client Public:  ${RU_CLIENT_PUBLIC_KEY}"
+
+# Step 7: Get DE public key
+echo ""
+echo -e "${YELLOW}[7/10] Configuring tunnel to DE server...${NC}"
+echo -e "${YELLOW}Enter DE Server Public Key (from DE server):${NC}"
+read -p "> " DE_PUBLIC_KEY
+
+if [ -z "$DE_PUBLIC_KEY" ]; then
+    echo -e "${RED}DE Public Key is required!${NC}"
+    echo -e "${YELLOW}Get it from DE server: cat /etc/amnezia/amneziawg/de_public.key${NC}"
+    exit 1
+fi
+
+# Create client config (tunnel to DE)
+cat > /etc/amnezia/amneziawg/awg-client.conf << EOF
+[Interface]
+PrivateKey = ${RU_CLIENT_PRIVATE_KEY}
+Address = 10.200.0.2/24
+DNS = 8.8.8.8
+Jc = 120
+Jmin = 50
+Jmax = 1000
+S1 = 111
+S2 = 222
+H1 = 1
+H2 = 2
+H3 = 3
+H4 = 4
+
+[Peer]
+PublicKey = ${DE_PUBLIC_KEY}
+Endpoint = ${DE_IP}:${VPN_PORT}
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+EOF
+
+# Create server config (for VPN clients)
+cat > /etc/amnezia/amneziawg/awg0.conf << EOF
+[Interface]
+PrivateKey = ${RU_SERVER_PRIVATE_KEY}
+Address = 10.10.0.1/24
+ListenPort = ${VPN_PORT}
+Jc = 120
+Jmin = 50
+Jmax = 1000
+S1 = 111
+S2 = 222
+H1 = 1
+H2 = 2
+H3 = 3
+H4 = 4
+
+# Peers will be added automatically by the backend
+EOF
+
+chmod 600 /etc/amnezia/amneziawg/*.conf
+
+echo -e "${YELLOW}IMPORTANT: Add this key to DE server:${NC}"
+echo -e "  RU Client Public Key: ${RU_CLIENT_PUBLIC_KEY}"
+echo ""
+echo -e "${YELLOW}On DE server, edit /etc/amnezia/amneziawg/awg0.conf and add:${NC}"
+echo -e "  [Peer]"
+echo -e "  PublicKey = ${RU_CLIENT_PUBLIC_KEY}"
+echo -e "  AllowedIPs = 10.200.0.2/32"
+echo ""
+echo -e "${YELLOW}Then restart: awg-quick down awg0 && awg-quick up awg0${NC}"
+echo ""
+read -p "Press Enter after adding the key to DE server..."
+
+# Step 8: Setup split-tunneling
+echo -e "${YELLOW}[8/10] Setting up split-tunneling...${NC}"
+
+# Create RU IP update script
+cat > /usr/local/bin/update_ru_ips.sh << 'SCRIPT'
+#!/bin/bash
+# Update Russian IP set for split-tunneling
+
+ipset create ru_ips hash:net 2>/dev/null || ipset flush ru_ips
+
+# Add private networks
+ipset add ru_ips 10.0.0.0/8 2>/dev/null || true
+ipset add ru_ips 192.168.0.0/16 2>/dev/null || true
+ipset add ru_ips 172.16.0.0/12 2>/dev/null || true
+ipset add ru_ips 127.0.0.0/8 2>/dev/null || true
+
+# Download and add Russian IPs
+curl -sL --connect-timeout 10 https://raw.githubusercontent.com/ipverse/rir-ip/master/country/ru/ipv4-aggregated.txt 2>/dev/null | \
+    grep -v '^#' | grep -E '^[0-9]' | \
+    while read line; do
+        ipset add ru_ips $line 2>/dev/null || true
+    done
+
+COUNT=$(ipset list ru_ips 2>/dev/null | grep 'Number of entries' | awk '{print $4}')
+echo "RU IPset updated: ${COUNT:-0} entries"
+SCRIPT
+chmod +x /usr/local/bin/update_ru_ips.sh
+
+# Create routing setup script
+cat > /usr/local/bin/setup_routing.sh << 'SCRIPT'
+#!/bin/bash
+# Setup split-tunneling routing for KrotVPN
+
+CLIENT_IF="awg0"
+TUNNEL_IF="awg-client"
+FWMARK=255
+ROUTING_TABLE=100
+
+echo "Setting up split-tunneling..."
+
+# Create ipsets
+ipset create ru_ips hash:net 2>/dev/null || ipset flush ru_ips
+ipset create custom_direct hash:net 2>/dev/null || ipset flush custom_direct
+ipset create custom_vpn hash:net 2>/dev/null || ipset flush custom_vpn
+
+# Setup routing table
+ip rule del fwmark $FWMARK lookup $ROUTING_TABLE 2>/dev/null || true
+ip rule add fwmark $FWMARK lookup $ROUTING_TABLE
+
+# Add default route through DE tunnel
+ip route del default dev $TUNNEL_IF table $ROUTING_TABLE 2>/dev/null || true
+ip route add default dev $TUNNEL_IF table $ROUTING_TABLE
+
+# Flush and create mangle chain
+iptables -t mangle -F AMNEZIA_PREROUTING 2>/dev/null || true
+iptables -t mangle -N AMNEZIA_PREROUTING 2>/dev/null || iptables -t mangle -F AMNEZIA_PREROUTING
+
+# Link chain to PREROUTING
+iptables -t mangle -D PREROUTING -i $CLIENT_IF -j AMNEZIA_PREROUTING 2>/dev/null || true
+iptables -t mangle -A PREROUTING -i $CLIENT_IF -j AMNEZIA_PREROUTING
+
+# Custom VPN routes (force through VPN)
+iptables -t mangle -A AMNEZIA_PREROUTING -m set --match-set custom_vpn dst -j MARK --set-mark $FWMARK
+iptables -t mangle -A AMNEZIA_PREROUTING -m set --match-set custom_vpn dst -j RETURN
+
+# Custom direct routes (bypass VPN)
+iptables -t mangle -A AMNEZIA_PREROUTING -m set --match-set custom_direct dst -j RETURN
+
+# RU bypass (Russian IPs go direct)
+iptables -t mangle -A AMNEZIA_PREROUTING -m set --match-set ru_ips dst -j RETURN
+
+# Default: mark for VPN (go through DE)
+iptables -t mangle -A AMNEZIA_PREROUTING -j MARK --set-mark $FWMARK
+
+# Setup NAT
+iptables -t nat -D POSTROUTING -o $TUNNEL_IF -j MASQUERADE 2>/dev/null || true
+iptables -t nat -A POSTROUTING -o $TUNNEL_IF -j MASQUERADE
+
+iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || true
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+
+# Allow forwarding
+iptables -A FORWARD -i $CLIENT_IF -j ACCEPT
+iptables -A FORWARD -o $CLIENT_IF -j ACCEPT
+
+echo "Split-tunneling configured!"
+SCRIPT
+chmod +x /usr/local/bin/setup_routing.sh
+
+# Run initial update
+/usr/local/bin/update_ru_ips.sh
+
+# Step 9: Configure Firewall
+echo -e "${YELLOW}[9/10] Configuring firewall...${NC}"
+
+ufw --force reset
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow 8080/tcp
+ufw allow ${VPN_PORT}/udp
+
+sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+
+ufw --force enable
+
+# Step 10: Clone and setup application
+echo -e "${YELLOW}[10/10] Setting up KrotVPN application...${NC}"
+
+cd /opt
+if [ -d "KrotVPN" ]; then
+    cd KrotVPN
+    git pull
+else
+    git clone https://github.com/anyagixx/KrotVPN.git
+    cd KrotVPN
+fi
+
+# Generate secrets
+SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+DATA_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
+
+# Create .env file
+cat > .env << EOF
+# === APPLICATION ===
+APP_NAME=KrotVPN
+APP_VERSION=1.0.0
+DEBUG=false
+ENVIRONMENT=production
+HOST=0.0.0.0
+PORT=8000
+
+# === SECURITY ===
+SECRET_KEY=${SECRET_KEY}
+DATA_ENCRYPTION_KEY=${DATA_KEY}
+ACCESS_TOKEN_EXPIRE_MINUTES=15
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+# === DATABASE ===
+DB_USER=krotvpn
+DB_PASSWORD=${DB_PASSWORD}
+DB_NAME=krotvpn
+DATABASE_URL=postgresql+asyncpg://krotvpn:${DB_PASSWORD}@db:5432/krotvpn
+
+# === REDIS ===
+REDIS_URL=redis://redis:6379/0
+
+# === CORS ===
+CORS_ORIGINS=["http://${RU_IP}","https://${RU_IP}","http://localhost"]
+
+# === ADMIN ===
+ADMIN_EMAIL=admin@krotvpn.com
+ADMIN_PASSWORD=ChangeMeImmediately123!
+
+# === VPN CONFIGURATION ===
+VPN_SUBNET=10.10.0.0/24
+VPN_PORT=${VPN_PORT}
+VPN_DNS=8.8.8.8, 1.1.1.1
+VPN_MTU=1360
+VPN_SERVER_PUBLIC_KEY=${RU_SERVER_PUBLIC_KEY}
+VPN_SERVER_ENDPOINT=${RU_IP}
+
+# === AMNEZIAWG OBFUSCATION (DO NOT CHANGE!) ===
+AWG_JC=120
+AWG_JMIN=50
+AWG_JMAX=1000
+AWG_S1=111
+AWG_S2=222
+AWG_H1=1
+AWG_H2=2
+AWG_H3=3
+AWG_H4=4
+
+# === TRIAL ===
+TRIAL_DAYS=3
+
+# === YOOKASSA (fill in later) ===
+YOOKASSA_SHOP_ID=
+YOOKASSA_SECRET_KEY=
+
+# === TELEGRAM (fill in later) ===
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_URL=
+
+# === EMAIL (optional) ===
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+EMAIL_FROM=noreply@krotvpn.com
+
+# === REFERRAL ===
+REFERRAL_BONUS_DAYS=7
+REFERRAL_MIN_PAYMENT=100.0
+
+# === DOMAIN ===
+DOMAIN=${RU_IP}
+EOF
+
+chmod 600 .env
+
+# Start AmneziaWG
+echo -e "${YELLOW}Starting AmneziaWG...${NC}"
+awg-quick up awg0 2>/dev/null || true
+awg-quick up awg-client 2>/dev/null || true
+
+# Setup routing
+/usr/local/bin/setup_routing.sh
+
+# Create systemd services
+cat > /etc/systemd/system/krotvpn-routing.service << 'SERVICE'
+[Unit]
+Description=KrotVPN Split-Tunneling Routing
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/setup_routing.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+cat > /etc/systemd/system/krotvpn-ru-ips.service << 'SERVICE'
+[Unit]
+Description=KrotVPN RU IPset Update
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/update_ru_ips.sh
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+cat > /etc/systemd/system/krotvpn-ru-ips.timer << 'TIMER'
+[Unit]
+Description=Daily RU IPset Update
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER
+
+systemctl daemon-reload
+systemctl enable krotvpn-routing
+systemctl start krotvpn-routing
+systemctl enable krotvpn-ru-ips.timer
+systemctl start krotvpn-ru-ips.timer
+
+# Build and start Docker containers
+echo -e "${YELLOW}Building Docker containers...${NC}"
+docker compose up -d --build
+
+# Wait for backend
+echo -e "${YELLOW}Waiting for backend to start...${NC}"
+sleep 10
+
+# Verify
+echo ""
+echo -e "${GREEN}================================================${NC}"
+echo -e "${GREEN}   RU SERVER SETUP COMPLETE!                   ${NC}"
+echo -e "${GREEN}================================================${NC}"
+echo ""
+echo -e "Server IP: ${RU_IP}"
+echo -e "VPN Port: ${VPN_PORT}/udp"
+echo ""
+echo -e "${BLUE}Services:${NC}"
+echo -e "  Frontend:    http://${RU_IP}"
+echo -e "  Admin Panel: http://${RU_IP}:8080"
+echo -e "  Backend API: http://${RU_IP}:8000"
+echo -e "  Health:      http://${RU_IP}:8000/health"
+echo ""
+echo -e "${BLUE}AmneziaWG Status:${NC}"
+awg show
+echo ""
+echo -e "${BLUE}Tunnel to DE:${NC}"
+ping -c 2 10.200.0.1 2>/dev/null && echo -e "${GREEN}Tunnel OK!${NC}" || echo -e "${RED}Tunnel FAILED - check DE server config${NC}"
+echo ""
+echo -e "${BLUE}Docker Status:${NC}"
+docker compose ps
+echo ""
+echo -e "${GREEN}Setup complete! Open http://${RU_IP} in your browser.${NC}"

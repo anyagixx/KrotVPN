@@ -1,219 +1,184 @@
-# 🛡️ KrotVPN - Commercial VPN Service
+# 🐀 KrotVPN
 
-**KrotVPN** — коммерческий VPN-сервис на базе протокола AmneziaWG для обхода блокировок Роскомнадзора.
+**Коммерческий VPN-сервис с обфускацией AmneziaWG и split-tunneling**
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
-![Python](https://img.shields.io/badge/python-3.11+-green)
-![License](https://img.shields.io/badge/license-MIT-blue)
+![Python](https://img.shields.io/badge/python-3.11-green)
+![React](https://img.shields.io/badge/react-18-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-## 🚀 Возможности
+## 🌟 Особенности
 
-- **AmneziaWG протокол** — обфусцированный WireGuard, не детектируемый DPI
-- **Split-tunneling** — российский трафик идет напрямую
-- **Web-панель** — удобное управление подписками
-- **Telegram бот** — уведомления и авторизация
-- **Реферальная система** — бонусы за приглашения
-- **Мультиязычность** — русский и английский интерфейс
-- **PWA** — установка как приложение на мобильные
+- **AmneziaWG** - обфусцированный WireGuard протокол для обхода DPI
+- **Split-Tunneling** - российские сайты открываются напрямую
+- **Двухуровневая архитектура** - RU Entry Node + DE Exit Node
+- **Коммерческая модель** - подписки, триалы, реферальная программа
+- **Telegram Bot** - управление через Telegram
+- **PWA** - установка как приложение на телефон
 
-## 📋 Архитектура
+## 🏗️ Архитектура
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Клиент    │────▶│  RU-сервер  │────▶│  DE-сервер  │────▶  Интернет
-│  (AmneziaWG)│     │ (Entry Node)│     │ (Exit Node) │
-└─────────────┘     └─────────────┘     └─────────────┘
-                           │
-                    ┌──────┴──────┐
-                    │   Web UI    │
-                    │  (FastAPI)  │
-                    └─────────────┘
+┌─────────────┐         ┌─────────────┐         ┌─────────────┐
+│   Клиенты   │ ──AWG─▶ │  RU Сервер  │ ──AWG─▶ │  DE Сервер  │ ──▶ │ Интернет
+│  (Россия)   │         │ (Entry Node)│         │ (Exit Node) │
+└─────────────┘         └─────────────┘         └─────────────┘
+                              │
+                              ▼
+                        ┌─────────────┐
+                        │   Docker    │
+                        │  - Backend  │
+                        │  - Frontend │
+                        │  - Admin    │
+                        │  - PostgreSQL
+                        │  - Redis    │
+                        └─────────────┘
 ```
 
-## 🛠 Технологии
+## ⚡ Быстрый старт
 
-### Backend
-- **Python 3.11+** — основной язык
-- **FastAPI** — REST API фреймворк
-- **SQLModel** — ORM с Pydantic
-- **PostgreSQL** — основная БД
-- **Redis** — кэширование и сессии
+### Требования
 
-### Frontend
-- **React 18** — UI фреймворк
-- **Vite** — сборщик
-- **TailwindCSS** — стили
-- **Zustand** — state management
-- **PWA** — оффлайн поддержка
+| Компонент | RU Сервер | DE Сервер |
+|-----------|-----------|-----------|
+| OS | Ubuntu 20.04/22.04 | Ubuntu 20.04/22.04 |
+| CPU | 2+ ядер | 1+ ядро |
+| RAM | 2+ GB | 1+ GB |
+| Порты | 22, 80, 443, 51821/udp | 22, 51821/udp |
 
-### Infrastructure
-- **Docker** — контейнеризация
-- **Nginx** — reverse proxy
-- **AmneziaWG** — VPN протокол
+### Установка
+
+1. **Клонируй репозиторий:**
+```bash
+git clone https://github.com/anyagixx/KrotVPN.git
+cd KrotVPN
+```
+
+2. **Настрой SSH доступ:**
+```bash
+ssh-copy-id root@DE_SERVER_IP
+ssh-copy-id root@RU_SERVER_IP
+```
+
+3. **Запусти быстрый деплой:**
+```bash
+./deploy/quick-start.sh
+```
+
+Или следуй [пошаговой инструкции](QUICKSTART.md).
+
+## 📱 Клиентские приложения
+
+| Платформа | Скачать |
+|-----------|---------|
+| Android | [Google Play](https://play.google.com/store/apps/details?id=org.amnezia.awg) |
+| iOS | [App Store](https://apps.apple.com/app/amneziawg/id6448364248) |
+| Windows | [GitHub Releases](https://github.com/amnezia-vpn/amneziawg-windows-client/releases) |
+| macOS | [GitHub Releases](https://github.com/amnezia-vpn/amneziawg-apple/releases) |
+
+## 🔧 Управление
+
+### Создание VPN клиента
+
+```bash
+ssh root@RU_SERVER_IP
+/opt/KrotVPN/deploy/create-client.sh username
+```
+
+### Проверка состояния
+
+```bash
+/opt/KrotVPN/deploy/health-check.sh
+```
+
+### Логи
+
+```bash
+cd /opt/KrotVPN
+docker compose logs -f backend
+```
 
 ## 📁 Структура проекта
 
 ```
-krotvpn/
-├── docs/                    # GRACE документация
-│   ├── requirements.xml     # Требования
-│   ├── technology.xml       # Технологии
-│   ├── development-plan.xml # План разработки
-│   ├── verification-plan.xml# План тестирования
-│   └── knowledge-graph.xml  # Граф зависимостей
-├── backend/
+KrotVPN/
+├── backend/                # FastAPI Backend
 │   ├── app/
-│   │   ├── core/           # Ядро (config, security, db)
-│   │   ├── users/          # Пользователи и авторизация
-│   │   ├── vpn/            # VPN управление (AmneziaWG)
-│   │   ├── billing/        # Подписки и платежи
-│   │   ├── referrals/      # Реферальная программа
-│   │   ├── routing/        # Split-tunneling
-│   │   └── main.py         # Точка входа
-│   ├── tests/
+│   │   ├── core/          # Config, Security, Database
+│   │   ├── users/         # Auth & Users
+│   │   ├── vpn/           # AmneziaWG Integration
+│   │   ├── billing/       # YooKassa Payments
+│   │   ├── referrals/     # Referral System
+│   │   └── main.py        # Entry Point
 │   └── Dockerfile
-├── frontend/
+│
+├── frontend/              # React User Dashboard
 │   ├── src/
-│   │   ├── components/     # React компоненты
-│   │   ├── pages/          # Страницы
-│   │   ├── stores/         # Zustand stores
-│   │   ├── lib/            # API клиент
-│   │   └── i18n/           # Переводы
+│   │   ├── pages/        # Dashboard, Config, Subscription
+│   │   ├── stores/       # Zustand State
+│   │   └── i18n/         # RU/EN Translations
+│   ├── Dockerfile
+│   └── nginx.conf
+│
+├── frontend-admin/        # React Admin Panel
+│   ├── src/
+│   │   └── pages/        # Users, Servers, Plans, Analytics
 │   └── Dockerfile
-├── telegram-bot/           # Telegram бот
-├── scripts/                # Скрипты установки
-└── docker-compose.yml
+│
+├── telegram-bot/          # Telegram Bot
+│   └── bot.py
+│
+├── deploy/                # Deployment Scripts
+│   ├── deploy-de-server.sh
+│   ├── deploy-ru-server.sh
+│   ├── create-client.sh
+│   ├── remove-client.sh
+│   ├── health-check.sh
+│   └── quick-start.sh
+│
+├── docker-compose.yml
+├── .env.example
+└── QUICKSTART.md
 ```
-
-## 🚀 Быстрый старт
-
-### Разработка
-
-```bash
-# Клонировать репозиторий
-git clone https://github.com/your-repo/krotvpn.git
-cd krotvpn
-
-# Backend
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# Отредактировать .env
-uvicorn app.main:app --reload
-
-# Frontend
-cd ../frontend
-npm install
-npm run dev
-```
-
-### Docker
-
-```bash
-# Создать .env файл
-cp .env.example .env
-# Отредактировать .env
-
-# Запустить
-docker-compose up -d
-
-# Проверить
-curl http://localhost:8000/health
-```
-
-## ⚙️ Конфигурация
-
-### Обязательные переменные
-
-```env
-SECRET_KEY=your-secret-key-at-least-32-characters
-DATABASE_URL=postgresql+asyncpg://user:pass@localhost/krotvpn
-```
-
-### Платежные системы
-
-```env
-YOOKASSA_SHOP_ID=your-shop-id
-YOOKASSA_SECRET_KEY=your-secret-key
-```
-
-### Telegram
-
-```env
-TELEGRAM_BOT_TOKEN=your-bot-token
-```
-
-## 📱 Клиенты
-
-- **Android**: [AmneziaWG](https://play.google.com/store/apps/details?id=org.amnezia.awg)
-- **iOS**: [AmneziaWG](https://apps.apple.com/app/amneziawg/id6448364661)
-- **Desktop**: [AmneziaVPN](https://amnezia.org/)
 
 ## 🔐 Безопасность
 
-- JWT токены с refresh
-- bcrypt хэширование паролей
-- Fernet шифрование приватных ключей
-- Rate limiting API
-- CORS защита
+- JWT токены с коротким сроком жизни
+- Fernet шифрование чувствительных данных
+- Rate limiting на API endpoints
+- CORS whitelist
+- UFW firewall на обоих серверах
 
-## 📊 API Endpoints
+## 💰 Монетизация
 
-### Auth
-- `POST /api/auth/register` — регистрация
-- `POST /api/auth/login` — вход
-- `POST /api/auth/refresh` — обновление токена
-- `POST /api/auth/telegram` — Telegram авторизация
+- **Триал**: 3 дня бесплатно
+- **Подписки**: 1/3/6/12 месяцев
+- **Реферальная программа**: +7 дней за приглашение
+- **YooKassa**: приём платежей
 
-### VPN
-- `GET /api/vpn/config` — получить конфиг
-- `GET /api/vpn/config/download` — скачать .conf
-- `GET /api/vpn/config/qr` — QR-код
-- `GET /api/vpn/stats` — статистика
+## 🌐 API Endpoints
 
-### Billing
-- `GET /api/billing/plans` — тарифы
-- `POST /api/billing/subscribe` — подписка
-- `GET /api/billing/subscription` — текущая подписка
+| Endpoint | Описание |
+|----------|----------|
+| `GET /health` | Health check |
+| `POST /api/auth/register` | Регистрация |
+| `POST /api/auth/login` | Авторизация |
+| `GET /api/vpn/config` | Получить конфиг VPN |
+| `GET /api/vpn/qr` | QR код для клиента |
+| `GET /api/subscription/status` | Статус подписки |
+| `POST /api/billing/create-payment` | Создать платёж |
 
-## 🧪 Тестирование
+Полная документация: `http://RU_SERVER_IP:8000/docs`
 
-```bash
-# Backend
-cd backend
-pytest --cov=app
+## 📞 Поддержка
 
-# Frontend
-cd frontend
-npm run test
-```
-
-## 📈 Мониторинг
-
-- Health check: `GET /health`
-- API Docs: `GET /docs` (только в debug режиме)
-- Prometheus metrics: `GET /metrics` (опционально)
-
-## 🤝 Разработка по методике GRACE
-
-Проект разработан по методике **GRACE** (Graph-RAG Anchored Code Engineering):
-
-1. `requirements.xml` — требования продукта
-2. `technology.xml` — стек технологий
-3. `development-plan.xml` — модули и фазы
-4. `verification-plan.xml` — тесты
-5. `knowledge-graph.xml` — зависимости
+- **GitHub Issues**: https://github.com/anyagixx/KrotVPN/issues
+- **Telegram**: @krotvpn_support
 
 ## 📄 Лицензия
 
 MIT License
 
-## 👤 Автор
-
-KrotVPN Team
-
 ---
 
-**⚠️ Важно**: AmneziaWG параметры обфускации (Jc, Jmin, Jmax, S1, S2, H1-H4) должны совпадать на сервере и клиенте!
+**Сделано с ❤️ для свободного интернета**

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.1] - 2026-03-22
+
+### Fixed
+- **CRITICAL**: Fixed frontend-admin build failure - missing lib/api.ts
+  - Added exception `!**/src/lib/` to .gitignore
+  - Force-added frontend/src/lib/api.ts and frontend-admin/src/lib/api.ts
+  - These were incorrectly ignored by the `lib/` pattern (meant for Python lib/)
+
+
 ## [2.2.0] - 2026-03-22
 
 ### Fixed

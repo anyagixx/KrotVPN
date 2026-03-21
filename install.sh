@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# KrotVPN Interactive Installer v2.1.5
+# KrotVPN Interactive Installer v2.1.6
 # Run this command to install:
 #   curl -fsSL https://raw.githubusercontent.com/anyagixx/KrotVPN/main/install.sh | bash
 #
@@ -21,7 +21,7 @@ print_banner() {
     echo "║                                                              ║"
     echo "║                         K R O T V P N                        ║"
     echo "║                                                              ║"
-    echo "║              Interactive Installer v2.1.5                    ║"
+    echo "║              Interactive Installer v2.1.6                    ║"
     echo "║                                                              ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -226,16 +226,20 @@ deploy() {
     print_info "Deploying... This will take 10-15 minutes."
     echo ""
     
-    # Create config file on RU server with all credentials
+    # Encode passwords in base64 (handles ALL special characters)
+    RU_PASS_B64=$(echo -n "$RU_PASS" | base64 -w0)
+    DE_PASS_B64=$(echo -n "$DE_PASS" | base64 -w0)
+    
+    # Create config file on RU server with base64 encoded passwords
     print_info "Creating configuration on RU server..."
     sshpass -p "$RU_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o LogLevel=ERROR "$RU_USER@$RU_IP" "cat > /tmp/krotvpn_deploy.conf" << EOF
 DE_IP='${DE_IP}'
 DE_USER='${DE_USER}'
-DE_PASS='${DE_PASS}'
+DE_PASS_B64='${DE_PASS_B64}'
 RU_IP='${RU_IP}'
 RU_USER='${RU_USER}'
-RU_PASS='${RU_PASS}'
+RU_PASS_B64='${RU_PASS_B64}'
 EOF
     
     if [ $? -ne 0 ]; then

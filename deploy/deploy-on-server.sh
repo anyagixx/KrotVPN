@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# KrotVPN Server Deployment Script v2.1.5
+# KrotVPN Server Deployment Script v2.1.6
 # Run this script ON the RU server
 #
 # Usage: ./deploy-on-server.sh
@@ -29,10 +29,27 @@ else
     exit 1
 fi
 
+# Decode base64 passwords
+if [ -n "$DE_PASS_B64" ]; then
+    DE_PASS=$(echo "$DE_PASS_B64" | base64 -d)
+    echo -e "${GREEN}[CONFIG] DE password decoded${NC}"
+else
+    echo -e "${RED}[ERROR] DE_PASS_B64 not found in config${NC}"
+    exit 1
+fi
+
+if [ -n "$RU_PASS_B64" ]; then
+    RU_PASS=$(echo "$RU_PASS_B64" | base64 -d)
+    echo -e "${GREEN}[CONFIG] RU password decoded${NC}"
+else
+    echo -e "${RED}[ERROR] RU_PASS_B64 not found in config${NC}"
+    exit 1
+fi
+
 # Validate required variables
-if [ -z "$DE_IP" ] || [ -z "$DE_USER" ] || [ -z "$DE_PASS" ] || [ -z "$RU_PASS" ]; then
+if [ -z "$DE_IP" ] || [ -z "$DE_USER" ] || [ -z "$DE_PASS" ]; then
     echo -e "${RED}[ERROR] Missing required configuration${NC}"
-    echo "Required: DE_IP, DE_USER, DE_PASS, RU_PASS"
+    echo "Required: DE_IP, DE_USER, DE_PASS"
     exit 1
 fi
 
@@ -52,7 +69,7 @@ echo -e "${GREEN}[OK] RU IPv4: ${RU_IP}${NC}"
 # Print banner
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║           KrotVPN Automated Deployment v2.1.5               ║${NC}"
+echo -e "${CYAN}║           KrotVPN Automated Deployment v2.1.6               ║${NC}"
 echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${CYAN}║  RU Server (Entry): ${RU_IP}                            ║${NC}"
 echo -e "${CYAN}║  DE Server (Exit):  ${DE_IP}                            ║${NC}"
@@ -407,7 +424,7 @@ DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 cat > .env << EOF
 # === APPLICATION ===
 APP_NAME=KrotVPN
-APP_VERSION=2.1.5
+APP_VERSION=2.1.6
 DEBUG=false
 ENVIRONMENT=production
 HOST=0.0.0.0

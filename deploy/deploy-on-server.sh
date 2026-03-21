@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# KrotVPN Server Deployment Script v2.1.8
+# KrotVPN Server Deployment Script v2.1.9
 # Run this script ON the RU server
 #
 
@@ -66,7 +66,7 @@ echo -e "${GREEN}[OK] RU IPv4: ${RU_IP}${NC}"
 # Print banner
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║           KrotVPN Automated Deployment v2.1.8               ║${NC}"
+echo -e "${CYAN}║           KrotVPN Automated Deployment v2.1.9               ║${NC}"
 echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${CYAN}║  RU Server (Entry): ${RU_IP}                            ║${NC}"
 echo -e "${CYAN}║  DE Server (Exit):  ${DE_IP}                            ║${NC}"
@@ -272,7 +272,7 @@ cat > awg-client.conf << EOF
 [Interface]
 PrivateKey = ${RU_CLIENT_PRIVATE}
 Address = 10.200.0.2/24
-DNS = 8.8.8.8
+Table = off
 Jc = 120
 Jmin = 50
 Jmax = 1000
@@ -286,7 +286,7 @@ H4 = 4
 [Peer]
 PublicKey = ${DE_PUBLIC_KEY}
 Endpoint = ${DE_IP}:${VPN_PORT}
-AllowedIPs = 10.10.0.0/24
+AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
 
@@ -437,7 +437,7 @@ DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 cat > .env << EOF
 # === APPLICATION ===
 APP_NAME=KrotVPN
-APP_VERSION=2.1.8
+APP_VERSION=2.1.9
 DEBUG=false
 ENVIRONMENT=production
 HOST=0.0.0.0

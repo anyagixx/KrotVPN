@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.9] - 2026-03-22
+
+### Fixed
+- **CRITICAL**: Fixed route conflict error "RTNETLINK answers: File exists"
+  - Added `Table = off` to awg-client.conf to prevent automatic route creation
+  - Removed DNS directive from awg-client.conf (not needed for server-to-server tunnel)
+  - All routing is now handled by setup_routing.sh script
+
+
 ## [2.1.8] - 2026-03-22
 
 ### Fixed

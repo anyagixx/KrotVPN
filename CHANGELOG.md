@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.8] - 2026-03-22
+
+### Fixed
+- **CRITICAL**: Fixed SSH connection hang during VPN tunnel setup
+  - Added explicit route to DE server via main gateway before starting VPN
+  - Changed AllowedIPs from 0.0.0.0/0 to 10.10.0.0/24 in awg-client.conf
+  - This prevents awg-quick from setting up aggressive routing rules
+  - SSH connections now stay alive during VPN initialization
+
+### Changed
+- Split-tunneling routing is now handled entirely by setup_routing.sh
+- VPN client interface no longer captures all traffic by default
+
+
 ## [2.1.7] - 2026-03-21
 
 ### Fixed

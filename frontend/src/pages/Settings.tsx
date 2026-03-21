@@ -24,7 +24,7 @@ export default function Settings() {
         localStorage.setItem('language', response.data.language)
         toast.success(t('success'))
       },
-      onError: () => toast.error(t('error')),
+      onError: () => { toast.error(t('error')) },
     }
   )
   
@@ -36,7 +36,7 @@ export default function Settings() {
         setNewPassword('')
         toast.success(t('passwordChanged'))
       },
-      onError: () => toast.error(t('error')),
+      onError: () => { toast.error(t('error')) },
     }
   )
   

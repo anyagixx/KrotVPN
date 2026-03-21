@@ -94,3 +94,4 @@ temp/
 /etc/amnezia/
 *.conf
 !example.conf
+!**/nginx.conf

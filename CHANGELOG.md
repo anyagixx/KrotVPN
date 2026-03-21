@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-03-22
+
+### Fixed
+- **CRITICAL**: Fixed Docker build failure - nginx.conf files now included in repository
+  - Added exception `!**/nginx.conf` to .gitignore
+  - Force-added nginx/nginx.conf, frontend/nginx.conf, frontend-admin/nginx.conf
+
+### Note
+- Tunnel test may fail initially - this is expected if DE server needs manual verification
+- Docker containers will start regardless of tunnel status
+
+
 ## [2.1.9] - 2026-03-22
 
 ### Fixed

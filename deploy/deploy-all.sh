@@ -1,10 +1,10 @@
 #!/bin/bash
 #
 # KrotVPN Fully Automated Deployment Script
-# Run this locally - it will deploy to both servers automatically
+# Uses SSH password authentication
 #
-# Usage: ./deploy/deploy-all.sh [RU_IP] [DE_IP]
-# Default: RU=212.113.121.164 DE=95.216.149.110
+# Usage: ./deploy/deploy-all.sh
+# Environment variables: RU_IP, RU_USER, RU_PASS, DE_IP, DE_USER, DE_PASS
 #
 
 set -e
@@ -17,36 +17,54 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Configuration
-RU_IP="${1:-212.113.121.164}"
-DE_IP="${2:-95.216.149.110}"
+# Configuration from environment or defaults
+RU_IP="${RU_IP:-212.113.121.164}"
+RU_USER="${RU_USER:-root}"
+RU_PASS="${RU_PASS:-}"
+DE_IP="${DE_IP:-95.216.149.110}"
+DE_USER="${DE_USER:-root}"
+DE_PASS="${DE_PASS:-}"
 VPN_PORT="51821"
-CLIENT_VPN_SUBNET="10.10.0.0/24"
-TUNNEL_SUBNET="10.200.0.0/24"
+
+# SSH command wrapper
+ssh_ru() {
+    sshpass -p "$RU_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=30 -o LogLevel=ERROR "$RU_USER@$RU_IP" "$@"
+}
+
+ssh_de() {
+    sshpass -p "$DE_PASS" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=30 -o LogLevel=ERROR "$DE_USER@$DE_IP" "$@"
+}
 
 # Print banner
 echo -e "${CYAN}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║           KrotVPN Automated Deployment v2.1.0               ║"
+echo "║           KrotVPN Automated Deployment v2.1.2               ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║  RU Server (Entry): ${RU_IP}                            ║"
 echo "║  DE Server (Exit):  ${DE_IP}                            ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# Check SSH access
-echo -e "${BLUE}[CHECK] Testing SSH access...${NC}"
+# Check credentials
+if [ -z "$RU_PASS" ] || [ -z "$DE_PASS" ]; then
+    echo -e "${RED}ERROR: SSH passwords not set${NC}"
+    echo -e "${YELLOW}Set environment variables: RU_PASS and DE_PASS${NC}"
+    exit 1
+fi
 
-if ! ssh -o ConnectTimeout=5 -o BatchMode=yes root@${RU_IP} "echo ok" 2>/dev/null; then
-    echo -e "${RED}ERROR: Cannot connect to RU server (${RU_IP})${NC}"
-    echo -e "${YELLOW}Run: ssh-copy-id root@${RU_IP}${NC}"
+# Check connections
+echo -e "${BLUE}[CHECK] Testing SSH connections...${NC}"
+
+if ! ssh_ru "echo ok" 2>/dev/null | grep -q "ok"; then
+    echo -e "${RED}ERROR: Cannot connect to RU server${NC}"
     exit 1
 fi
 echo -e "${GREEN}✓ RU server accessible${NC}"
 
-if ! ssh -o ConnectTimeout=5 -o BatchMode=yes root@${DE_IP} "echo ok" 2>/dev/null; then
-    echo -e "${RED}ERROR: Cannot connect to DE server (${DE_IP})${NC}"
-    echo -e "${YELLOW}Run: ssh-copy-id root@${DE_IP}${NC}"
+if ! ssh_de "echo ok" 2>/dev/null | grep -q "ok"; then
+    echo -e "${RED}ERROR: Cannot connect to DE server${NC}"
     exit 1
 fi
 echo -e "${GREEN}✓ DE server accessible${NC}"
@@ -60,7 +78,7 @@ echo -e "${CYAN}PHASE 1: RU Server - Installing dependencies & generating keys${
 echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-ssh root@${RU_IP} "bash -s" << 'REMOTE_SCRIPT'
+ssh_ru "bash -s" << 'REMOTE_SCRIPT'
 set -e
 
 RED='\033[0;31m'
@@ -99,10 +117,7 @@ echo -e "${BLUE}[RU] Generating AmneziaWG keys...${NC}"
 mkdir -p /etc/amnezia/amneziawg
 cd /etc/amnezia/amneziawg
 
-# Generate server keys (for VPN clients)
 awg genkey | tee ru_server_private.key | awg pubkey > ru_server_public.key
-
-# Generate client keys (for tunnel to DE)
 awg genkey | tee ru_client_private.key | awg pubkey > ru_client_public.key
 
 RU_SERVER_PUBLIC=$(cat ru_server_public.key)
@@ -111,10 +126,6 @@ RU_CLIENT_PUBLIC=$(cat ru_client_public.key)
 echo -e "${GREEN}[RU] Keys generated:${NC}"
 echo -e "  Server Public: ${RU_SERVER_PUBLIC}"
 echo -e "  Client Public: ${RU_CLIENT_PUBLIC}"
-
-# Output for parsing
-echo "RU_SERVER_PUBLIC_KEY=${RU_SERVER_PUBLIC}"
-echo "RU_CLIENT_PUBLIC_KEY=${RU_CLIENT_PUBLIC}"
 REMOTE_SCRIPT
 
 echo ""
@@ -127,10 +138,10 @@ echo -e "${CYAN}PHASE 2: DE Server - Full installation and configuration${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-# Get RU keys from previous output
-RU_CLIENT_PUBLIC_KEY=$(ssh root@${RU_IP} "cat /etc/amnezia/amneziawg/ru_client_public.key")
+# Get RU client public key
+RU_CLIENT_PUBLIC_KEY=$(ssh_ru "cat /etc/amnezia/amneziawg/ru_client_public.key")
 
-ssh root@${DE_IP} "RU_CLIENT_PUBLIC_KEY='${RU_CLIENT_PUBLIC_KEY}' VPN_PORT='${VPN_PORT}' DE_IP='${DE_IP}' bash -s" << 'REMOTE_SCRIPT'
+ssh_de "RU_CLIENT_PUBLIC_KEY='${RU_CLIENT_PUBLIC_KEY}' VPN_PORT='${VPN_PORT}' bash -s" << 'REMOTE_SCRIPT'
 set -e
 
 RED='\033[0;31m'
@@ -144,8 +155,7 @@ apt update -qq && apt upgrade -y -qq
 
 echo -e "${BLUE}[DE] Installing dependencies...${NC}"
 apt install -y -qq software-properties-common python3-launchpadlib gnupg2 \
-    linux-headers-$(uname -r) curl wget git ipset iptables ufw qrencode \
-    ca-certificates
+    linux-headers-$(uname -r) curl wget git ipset iptables ufw qrencode ca-certificates
 
 echo -e "${BLUE}[DE] Installing AmneziaWG...${NC}"
 if ! command -v awg &> /dev/null; then
@@ -199,36 +209,20 @@ ufw allow 22/tcp > /dev/null
 ufw allow ${VPN_PORT}/udp > /dev/null
 sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
 
-# Add NAT rules
 cat > /etc/ufw/before.rules << 'NAT'
-#
-# rules.before
-#
 *filter
 :ufw-before-input - [0:0]
 :ufw-before-output - [0:0]
 :ufw-before-forward - [0:0]
 :ufw-not-local - [0:0]
-
 -A ufw-before-input -i lo -j ACCEPT
 -A ufw-before-output -o lo -j ACCEPT
 -A ufw-before-input -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 -A ufw-before-output -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 -A ufw-before-forward -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
--A ufw-before-input -m conntrack --ctstate INVALID -j ufw-logging-deny
 -A ufw-before-input -m conntrack --ctstate INVALID -j DROP
--A ufw-before-input -p icmp --icmp-type destination-unreachable -j ACCEPT
--A ufw-before-input -p icmp --icmp-type time-exceeded -j ACCEPT
--A ufw-before-input -p icmp --icmp-type parameter-problem -j ACCEPT
 -A ufw-before-input -p icmp --icmp-type echo-request -j ACCEPT
--A ufw-before-output -p icmp --icmp-type destination-unreachable -j ACCEPT
--A ufw-before-output -p icmp --icmp-type time-exceeded -j ACCEPT
--A ufw-before-output -p icmp --icmp-type parameter-problem -j ACCEPT
 -A ufw-before-output -p icmp --icmp-type echo-request -j ACCEPT
--A ufw-before-forward -p icmp --icmp-type destination-unreachable -j ACCEPT
--A ufw-before-forward -p icmp --icmp-type time-exceeded -j ACCEPT
--A ufw-before-forward -p icmp --icmp-type parameter-problem -j ACCEPT
--A ufw-before-forward -p icmp --icmp-type echo-request -j ACCEPT
 -A ufw-before-input -p udp --sport 67 --dport 68 -j ACCEPT
 -A ufw-before-input -j ufw-not-local
 -A ufw-not-local -m addrtype --dst-type LOCAL -j RETURN
@@ -236,7 +230,6 @@ cat > /etc/ufw/before.rules << 'NAT'
 -A ufw-not-local -m addrtype --dst-type BROADCAST -j RETURN
 -A ufw-not-local -j DROP
 COMMIT
-
 *nat
 :POSTROUTING ACCEPT [0:0]
 -A POSTROUTING -s 10.200.0.0/24 -o eth0 -j MASQUERADE
@@ -250,7 +243,6 @@ awg-quick down awg0 2>/dev/null || true
 awg-quick up awg0
 
 echo -e "${GREEN}[DE] Server ready!${NC}"
-echo "DE_PUBLIC_KEY=${DE_PUBLIC}"
 REMOTE_SCRIPT
 
 echo ""
@@ -264,9 +256,9 @@ echo -e "${CYAN}═════════════════════�
 echo ""
 
 # Get DE public key
-DE_PUBLIC_KEY=$(ssh root@${DE_IP} "cat /etc/amnezia/amneziawg/de_public.key")
+DE_PUBLIC_KEY=$(ssh_de "cat /etc/amnezia/amneziawg/de_public.key")
 
-ssh root@${RU_IP} "DE_PUBLIC_KEY='${DE_PUBLIC_KEY}' RU_IP='${RU_IP}' DE_IP='${DE_IP}' VPN_PORT='${VPN_PORT}' bash -s" << 'REMOTE_SCRIPT'
+ssh_ru "DE_PUBLIC_KEY='${DE_PUBLIC_KEY}' RU_IP='${RU_IP}' DE_IP='${DE_IP}' VPN_PORT='${VPN_PORT}' bash -s" << 'REMOTE_SCRIPT'
 set -e
 
 RED='\033[0;31m'
@@ -325,7 +317,6 @@ chmod 600 /etc/amnezia/amneziawg/*.conf
 
 echo -e "${BLUE}[RU] Setting up split-tunneling...${NC}"
 
-# Create RU IP update script
 cat > /usr/local/bin/update_ru_ips.sh << 'UPDATE_SCRIPT'
 #!/bin/bash
 ipset create ru_ips hash:net 2>/dev/null || ipset flush ru_ips
@@ -334,16 +325,13 @@ ipset add ru_ips 192.168.0.0/16 2>/dev/null || true
 ipset add ru_ips 172.16.0.0/12 2>/dev/null || true
 ipset add ru_ips 127.0.0.0/8 2>/dev/null || true
 curl -sL --connect-timeout 10 https://raw.githubusercontent.com/ipverse/rir-ip/master/country/ru/ipv4-aggregated.txt 2>/dev/null | \
-    grep -v '^#' | grep -E '^[0-9]' | \
-    while read line; do
+    grep -v '^#' | grep -E '^[0-9]' | while read line; do
         ipset add ru_ips $line 2>/dev/null || true
     done
-COUNT=$(ipset list ru_ips 2>/dev/null | grep 'Number of entries' | awk '{print $4}')
-echo "RU IPset updated: ${COUNT:-0} entries"
+echo "RU IPset updated"
 UPDATE_SCRIPT
 chmod +x /usr/local/bin/update_ru_ips.sh
 
-# Create routing setup script
 cat > /usr/local/bin/setup_routing.sh << 'ROUTING_SCRIPT'
 #!/bin/bash
 CLIENT_IF="awg0"
@@ -384,10 +372,9 @@ echo "Split-tunneling configured!"
 ROUTING_SCRIPT
 chmod +x /usr/local/bin/setup_routing.sh
 
-# Run initial IP update
 /usr/local/bin/update_ru_ips.sh
 
-echo -e "${BLUE}[RU] Configuring firewall (including HTTPS ports)...${NC}"
+echo -e "${BLUE}[RU] Configuring firewall...${NC}"
 ufw --force reset > /dev/null
 ufw allow 22/tcp > /dev/null
 ufw allow 80/tcp > /dev/null
@@ -408,8 +395,6 @@ awg-quick up awg-client
 echo -e "${BLUE}[RU] Setting up routing...${NC}"
 /usr/local/bin/setup_routing.sh
 
-# Test tunnel
-echo -e "${BLUE}[RU] Testing tunnel to DE...${NC}"
 sleep 2
 if ping -c 3 10.200.0.1 > /dev/null 2>&1; then
     echo -e "${GREEN}[RU] ✓ Tunnel to DE is working!${NC}"
@@ -429,16 +414,11 @@ fi
 echo -e "${BLUE}[RU] Generating SSL certificate...${NC}"
 mkdir -p /opt/KrotVPN/ssl
 cd /opt/KrotVPN/ssl
-
-# Generate self-signed certificate
 openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-    -keyout server.key \
-    -out server.crt \
+    -keyout server.key -out server.crt \
     -subj "/C=RU/ST=Moscow/L=Moscow/O=KrotVPN/OU=IT/CN=krotvpn.local" 2>/dev/null
-
 chmod 600 server.key
 chmod 644 server.crt
-
 echo -e "${GREEN}[RU] SSL certificate generated${NC}"
 
 echo -e "${BLUE}[RU] Generating secrets...${NC}"
@@ -447,11 +427,10 @@ SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 DATA_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 
-echo -e "${BLUE}[RU] Creating .env file...${NC}"
 cat > .env << EOF
 # === APPLICATION ===
 APP_NAME=KrotVPN
-APP_VERSION=2.1.0
+APP_VERSION=2.1.2
 DEBUG=false
 ENVIRONMENT=production
 HOST=0.0.0.0
@@ -501,15 +480,15 @@ AWG_H4=4
 # === TRIAL ===
 TRIAL_DAYS=3
 
-# === YOOKASSA (fill in later) ===
+# === YOOKASSA ===
 YOOKASSA_SHOP_ID=
 YOOKASSA_SECRET_KEY=
 
-# === TELEGRAM (fill in later) ===
+# === TELEGRAM ===
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_WEBHOOK_URL=
 
-# === EMAIL (optional) ===
+# === EMAIL ===
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=
@@ -526,9 +505,7 @@ EOF
 
 chmod 600 .env
 
-# Create systemd services
-echo -e "${BLUE}[RU] Creating systemd services...${NC}"
-
+# Systemd services
 cat > /etc/systemd/system/krotvpn-routing.service << 'SERVICE'
 [Unit]
 Description=KrotVPN Split-Tunneling Routing
@@ -589,22 +566,15 @@ echo -e "${CYAN}═════════════════════�
 echo ""
 
 echo -e "${BLUE}[CHECK] Tunnel RU ↔ DE...${NC}"
-if ssh root@${RU_IP} "ping -c 2 10.200.0.1" > /dev/null 2>&1; then
+if ssh_ru "ping -c 2 10.200.0.1" 2>/dev/null | grep -q "bytes from"; then
     echo -e "${GREEN}✓ Tunnel working${NC}"
 else
     echo -e "${RED}✗ Tunnel not working${NC}"
 fi
 
-echo -e "${BLUE}[CHECK] Backend health...${NC}"
-sleep 5
-if curl -sk "https://${RU_IP}:8000/health" | grep -q "healthy\|ok"; then
-    echo -e "${GREEN}✓ Backend is healthy${NC}"
-else
-    echo -e "${YELLOW}⚠ Backend may still be starting...${NC}"
-fi
-
 echo -e "${BLUE}[CHECK] Docker containers...${NC}"
-ssh root@${RU_IP} "docker compose -f /opt/KrotVPN/docker-compose.yml ps"
+sleep 5
+ssh_ru "docker compose -f /opt/KrotVPN/docker-compose.yml ps"
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
@@ -615,18 +585,7 @@ echo -e "${GREEN}║  🌐 Frontend:    https://${RU_IP}                        
 echo -e "${GREEN}║  🔧 Admin Panel: https://${RU_IP}:8443                     ${NC}"
 echo -e "${GREEN}║  🔌 Backend API: https://${RU_IP}:8000                     ${NC}"
 echo -e "${GREEN}║                                                              ║${NC}"
-echo -e "${YELLOW}║  ⚠️  Your browser will warn about self-signed certificate.  ${NC}"
+echo -e "${YELLOW}║  ⚠️  Browser will warn about self-signed certificate.       ${NC}"
 echo -e "${YELLOW}║     Click 'Advanced' → 'Proceed' to continue.               ${NC}"
-echo -e "${GREEN}║                                                              ║${NC}"
-echo -e "${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║  📱 Create VPN client:                                      ${NC}"
-echo -e "${GREEN}║  ssh root@${RU_IP} \"/opt/KrotVPN/deploy/create-client.sh test\"${NC}"
-echo -e "${GREEN}║                                                              ║${NC}"
-echo -e "${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║  ⚙️  Configure in /opt/KrotVPN/.env:                         ${NC}"
-echo -e "${GREEN}║     - YOOKASSA_SHOP_ID                                       ${NC}"
-echo -e "${GREEN}║     - YOOKASSA_SECRET_KEY                                    ${NC}"
-echo -e "${GREEN}║     - TELEGRAM_BOT_TOKEN                                     ${NC}"
-echo -e "${GREEN}║     - ADMIN_PASSWORD (change default!)                       ${NC}"
 echo -e "${GREEN}║                                                              ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"

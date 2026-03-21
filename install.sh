@@ -4,9 +4,6 @@
 # Run this command to install:
 #   curl -fsSL https://raw.githubusercontent.com/anyagixx/KrotVPN/main/install.sh | bash
 #
-# Or:
-#   wget -qO- https://raw.githubusercontent.com/anyagixx/KrotVPN/main/install.sh | bash
-#
 
 set -e
 
@@ -16,22 +13,26 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-BOLD='\033[1m'
 NC='\033[0m'
+
+# Credentials (will be set during installation)
+RU_IP=""
+RU_USER="root"
+RU_PASS=""
+DE_IP=""
+DE_USER="root"
+DE_PASS=""
 
 # Print functions
 print_banner() {
     echo -e "${CYAN}"
-    echo " /$$   /$$ /$$$$$$$   /$$$$$$  /$$$$$$$$ /$$    /$$ /$$$$$$$  /$$   /$$"
-    echo "| $$  /$$/| $$__  $$ /$$__  $$|__  $$__/| $$   | $$| $$__  $$| $$$ | $$"
-    echo "| $$ /$$/ | $$  \ $$| $$  \ $$   | $$   | $$   | $$| $$  \ $$| \$\$\$\$| $$"
-    echo "| \$\$\$\$/  | \$\$\$\$\$\$/| $$  | $$   | $$   |  $$ / $$/| \$\$\$\$\$\$/| $$ \$\$ $$"
-    echo "| $$  $$  | $$__  $$| $$  | $$   | $$    \  $$ \$\$/ | $$____/ | $$  \$\$\$\$"
-    echo "| $$\  $$ | $$  \ $$| $$  | $$   | $$     \  \$\$\$/  | $$      | $$\  $$$"
-    echo "| $$ \  $$| $$  | $$|  \$\$\$\$\$/   | $$      \  $/   | $$      | $$ \  $$"
-    echo "|__/  \__/|__/  |__/ \______/    |__/       \_/    |__/      |__/  \__/"
-    echo ""
-    echo "              Interactive Installer v2.1.1"
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║                                                              ║"
+    echo "║                         K R O T V P N                        ║"
+    echo "║                                                              ║"
+    echo "║              Interactive Installer v2.1.2                    ║"
+    echo "║                                                              ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
 
@@ -59,6 +60,7 @@ print_info() {
     echo -e "${BLUE}ℹ $1${NC}"
 }
 
+# Read input from terminal (works with curl | bash)
 ask() {
     local prompt="$1"
     local default="$2"
@@ -77,6 +79,36 @@ ask() {
     fi
     
     eval "$var='$value'"
+}
+
+# Read password with asterisks
+ask_password() {
+    local prompt="$1"
+    local var="$2"
+    
+    echo -ne "${YELLOW}${prompt}: ${NC}"
+    
+    local password=""
+    local char=""
+    
+    while IFS= read -r -n1 -s char < /dev/tty; do
+        if [[ -z "$char" ]]; then
+            # Enter pressed
+            echo ""
+            break
+        elif [[ "$char" == $'\x7f' ]] || [[ "$char" == $'\x08' ]]; then
+            # Backspace
+            if [ -n "$password" ]; then
+                password="${password%?}"
+                echo -ne "\b \b"
+            fi
+        else
+            password+="$char"
+            echo -n "*"
+        fi
+    done
+    
+    eval "$var='$password'"
 }
 
 ask_yesno() {
@@ -105,7 +137,31 @@ ask_yesno() {
     fi
 }
 
-# Check if running on a server or locally
+# SSH command with password
+ssh_cmd() {
+    local host="$1"
+    local user="$2"
+    local pass="$3"
+    shift 3
+    local cmd="$@"
+    
+    sshpass -p "$pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=10 -o LogLevel=ERROR "$user@$host" "$cmd"
+}
+
+# SCP with password
+scp_cmd() {
+    local src="$1"
+    local host="$2"
+    local user="$3"
+    local pass="$4"
+    local dst="$5"
+    
+    sshpass -p "$pass" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=10 -o LogLevel=ERROR "$src" "$user@$host:$dst"
+}
+
+# Check environment
 check_environment() {
     print_step "Step 1: Checking environment"
     
@@ -137,6 +193,17 @@ check_environment() {
         print_info "Install with: sudo apt install curl"
         exit 1
     fi
+    
+    # Check/install sshpass
+    if ! command -v sshpass &> /dev/null; then
+        print_info "Installing sshpass..."
+        if command -v sudo &> /dev/null; then
+            sudo apt update -qq && sudo apt install -y -qq sshpass
+        else
+            apt update -qq && apt install -y -qq sshpass
+        fi
+    fi
+    print_success "sshpass available"
 }
 
 # Get server information
@@ -148,13 +215,13 @@ get_server_info() {
     echo -e "  ${CYAN}• DE Server (Germany/EU)${NC} - Exit node, provides internet access"
     echo ""
     
-    ask "Enter RU Server IP address (Russia)" "" RU_IP
+    ask "Enter RU Server IP address" "" RU_IP
     if [ -z "$RU_IP" ]; then
         print_error "RU Server IP is required"
         exit 1
     fi
     
-    ask "Enter DE Server IP address (Germany/EU)" "" DE_IP
+    ask "Enter DE Server IP address" "" DE_IP
     if [ -z "$DE_IP" ]; then
         print_error "DE Server IP is required"
         exit 1
@@ -173,97 +240,50 @@ get_server_info() {
     fi
 }
 
-# Setup SSH keys
-setup_ssh() {
-    print_step "Step 3: SSH access setup"
+# Get SSH credentials
+get_credentials() {
+    print_step "Step 3: SSH credentials"
     
-    # Check if SSH key exists
-    if [ ! -f ~/.ssh/id_rsa.pub ] && [ ! -f ~/.ssh/id_ed25519.pub ]; then
-        echo -e "${BLUE}No SSH key found. We need to create one.${NC}"
-        ask_yesno "Generate SSH key?" "y" GEN_KEY
-        
-        if [ "$GEN_KEY" = "y" ]; then
-            print_info "Generating SSH key (press Enter for defaults)..."
-            ssh-keygen -t ed25519 -C "krotvpn" -f ~/.ssh/id_ed25519 -N ""
-            print_success "SSH key generated"
-        else
-            print_error "SSH key is required for automated deployment"
-            exit 1
-        fi
-    else
-        print_success "SSH key found"
-    fi
-    
-    # Get the public key
-    if [ -f ~/.ssh/id_ed25519.pub ]; then
-        SSH_KEY=$(cat ~/.ssh/id_ed25519.pub)
-    else
-        SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
-    fi
-    
-    echo ""
-    echo -e "${YELLOW}Your SSH public key:${NC}"
-    echo -e "${CYAN}${SSH_KEY}${NC}"
+    echo -e "${BLUE}Enter SSH credentials for your servers:${NC}"
     echo ""
     
-    # Test SSH access to RU
-    print_info "Testing SSH access to RU server (${RU_IP})..."
-    if ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no root@${RU_IP} "echo ok" 2>/dev/null; then
-        print_success "RU server accessible via SSH"
-        RU_SSH_OK=1
+    # RU Server credentials
+    echo -e "${CYAN}RU Server (${RU_IP}):${NC}"
+    ask "  SSH username" "root" RU_USER
+    ask_password "  SSH password" RU_PASS
+    
+    if [ -z "$RU_PASS" ]; then
+        print_error "Password is required"
+        exit 1
+    fi
+    echo ""
+    
+    # DE Server credentials
+    echo -e "${CYAN}DE Server (${DE_IP}):${NC}"
+    ask "  SSH username" "root" DE_USER
+    ask_password "  SSH password" DE_PASS
+    
+    if [ -z "$DE_PASS" ]; then
+        print_error "Password is required"
+        exit 1
+    fi
+    echo ""
+    
+    # Test connections
+    print_info "Testing connection to RU server..."
+    if ssh_cmd "$RU_IP" "$RU_USER" "$RU_PASS" "echo ok" 2>/dev/null | grep -q "ok"; then
+        print_success "RU server connection OK"
     else
-        RU_SSH_OK=0
-        print_warning "Cannot connect to RU server"
-        echo ""
-        echo -e "${YELLOW}You need to add your SSH key to the RU server.${NC}"
-        echo -e "${YELLOW}Run this command on the RU server:${NC}"
-        echo ""
-        echo -e "${GREEN}  echo '${SSH_KEY}' >> ~/.ssh/authorized_keys${NC}"
-        echo ""
-        ask_yesno "Have you added the key to RU server?" "n" RU_KEY_ADDED
-        if [ "$RU_KEY_ADDED" != "y" ]; then
-            print_error "Please add the SSH key and run the installer again"
-            exit 1
-        fi
-        
-        # Test again
-        if ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no root@${RU_IP} "echo ok" 2>/dev/null; then
-            print_success "RU server accessible via SSH"
-            RU_SSH_OK=1
-        else
-            print_error "Still cannot connect to RU server"
-            exit 1
-        fi
+        print_error "Cannot connect to RU server. Check credentials."
+        exit 1
     fi
     
-    # Test SSH access to DE
-    print_info "Testing SSH access to DE server (${DE_IP})..."
-    if ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no root@${DE_IP} "echo ok" 2>/dev/null; then
-        print_success "DE server accessible via SSH"
-        DE_SSH_OK=1
+    print_info "Testing connection to DE server..."
+    if ssh_cmd "$DE_IP" "$DE_USER" "$DE_PASS" "echo ok" 2>/dev/null | grep -q "ok"; then
+        print_success "DE server connection OK"
     else
-        DE_SSH_OK=0
-        print_warning "Cannot connect to DE server"
-        echo ""
-        echo -e "${YELLOW}You need to add your SSH key to the DE server.${NC}"
-        echo -e "${YELLOW}Run this command on the DE server:${NC}"
-        echo ""
-        echo -e "${GREEN}  echo '${SSH_KEY}' >> ~/.ssh/authorized_keys${NC}"
-        echo ""
-        ask_yesno "Have you added the key to DE server?" "n" DE_KEY_ADDED
-        if [ "$DE_KEY_ADDED" != "y" ]; then
-            print_error "Please add the SSH key and run the installer again"
-            exit 1
-        fi
-        
-        # Test again
-        if ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no root@${DE_IP} "echo ok" 2>/dev/null; then
-            print_success "DE server accessible via SSH"
-            DE_SSH_OK=1
-        else
-            print_error "Still cannot connect to DE server"
-            exit 1
-        fi
+        print_error "Cannot connect to DE server. Check credentials."
+        exit 1
     fi
 }
 
@@ -286,18 +306,8 @@ clone_repo() {
     fi
     
     print_info "Cloning KrotVPN repository..."
-    
-    # Detect if we're running from curl or from local
-    if [ -f "$(dirname "$0")/deploy/deploy-all.sh" ]; then
-        # Running from local directory
-        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-        cp -r "$SCRIPT_DIR" "$INSTALL_DIR"
-        print_success "Copied from local directory"
-    else
-        # Running from curl
-        git clone https://github.com/anyagixx/KrotVPN.git "$INSTALL_DIR"
-        print_success "Cloned from GitHub"
-    fi
+    git clone https://github.com/anyagixx/KrotVPN.git "$INSTALL_DIR"
+    print_success "Cloned from GitHub"
     
     cd "$INSTALL_DIR"
 }
@@ -323,10 +333,14 @@ run_deployment() {
     print_info "This will take 10-15 minutes. Please wait..."
     echo ""
     
-    # Run deploy-all.sh with the server IPs
+    # Run deploy-all.sh with credentials
     cd "$INSTALL_DIR"
     chmod +x deploy/deploy-all.sh
-    ./deploy/deploy-all.sh "$RU_IP" "$DE_IP"
+    
+    # Export credentials for deploy script
+    export RU_IP RU_USER RU_PASS DE_IP DE_USER DE_PASS
+    
+    ./deploy/deploy-all.sh
     
     DEPLOY_EXIT=$?
     
@@ -380,7 +394,7 @@ main() {
     print_banner
     check_environment
     get_server_info
-    setup_ssh
+    get_credentials
     clone_repo
     run_deployment
     show_complete

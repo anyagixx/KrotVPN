@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.2] - 2026-03-21
+
+### Changed
+- **MAJOR**: Simplified installation - now uses SSH password authentication instead of SSH keys
+  - No more manual SSH key setup required
+  - Script asks for username/password for each server
+  - Password input shows asterisks for security
+- Removed complex ASCII art banner - replaced with simple "KROTVPN" text
+- Default SSH username is `root`
+
+### Fixed
+- Interactive input now works correctly when running via `curl | bash`
+- All `read` commands use `/dev/tty` for terminal input
+
 ## [2.1.1] - 2026-03-21
 
 ### Fixed
@@ -46,11 +60,6 @@ All notable changes to this project will be documented in this file.
 - Updated `deploy-ru-server.sh` - accepts DE_PUBLIC_KEY via environment variable
 - Updated `deploy-de-server.sh` - accepts RU_CLIENT_PUBLIC_KEY via environment variable
 - All scripts now work non-interactively when keys are provided via env vars
-
-### Changed
-- Deployment order: RU → DE → Link (was DE → RU which caused errors)
-- All apt commands now use `-qq` for cleaner output
-- Improved error messages and status indicators
 
 ## [2.0.0] - 2026-03-21
 

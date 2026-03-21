@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# KrotVPN Server Deployment Script v2.2.1
+# KrotVPN Server Deployment Script v2.3.0
 # Run this script ON the RU server
 #
 
@@ -66,7 +66,7 @@ echo -e "${GREEN}[OK] RU IPv4: ${RU_IP}${NC}"
 # Print banner
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║           KrotVPN Automated Deployment v2.2.1               ║${NC}"
+echo -e "${CYAN}║           KrotVPN Automated Deployment v2.3.0               ║${NC}"
 echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${CYAN}║  RU Server (Entry): ${RU_IP}                            ║${NC}"
 echo -e "${CYAN}║  DE Server (Exit):  ${DE_IP}                            ║${NC}"
@@ -155,13 +155,14 @@ echo -e "${CYAN}PHASE 2: DE Server - Installation${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-# Create script for DE server
+# Create script for DE server - FIXED: proper firewall config
 cat > /tmp/de_setup.sh << 'DESCRIPT'
 #!/bin/bash
 set -e
 
 RU_CLIENT_PUBLIC="$1"
 VPN_PORT="$2"
+DE_IP="$3"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -196,6 +197,7 @@ DE_PRIVATE=$(cat de_private.key)
 DE_PUBLIC=$(cat de_public.key)
 
 echo -e "${GREEN}✓ Keys generated${NC}"
+echo -e "  DE Public: ${DE_PUBLIC}"
 
 echo -e "${BLUE}[DE] Creating AmneziaWG config...${NC}"
 cat > /etc/amnezia/amneziawg/awg0.conf << EOF
@@ -219,25 +221,49 @@ AllowedIPs = 10.200.0.2/32
 EOF
 
 chmod 600 /etc/amnezia/amneziawg/awg0.conf
+echo -e "${GREEN}✓ Config created${NC}"
 
+# FIXED: Proper firewall configuration without breaking UFW
 echo -e "${BLUE}[DE] Configuring firewall...${NC}"
-ufw --force reset > /dev/null
-ufw allow 22/tcp > /dev/null
-ufw allow ${VPN_PORT}/udp > /dev/null
-sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
 
-cat > /etc/ufw/before.rules << 'NAT'
-*nat
-:POSTROUTING ACCEPT [0:0]
--A POSTROUTING -s 10.200.0.0/24 -o eth0 -j MASQUERADE
-COMMIT
-NAT
+# Reset UFW but keep it simple
+ufw --force reset > /dev/null 2>&1
+ufw default allow FORWARD > /dev/null 2>&1
+ufw allow 22/tcp > /dev/null 2>&1
+ufw allow ${VPN_PORT}/udp > /dev/null 2>&1
+ufw --force enable > /dev/null 2>&1
 
-ufw --force enable > /dev/null
+# Add NAT rule directly via iptables (survives reboot via iptables-persistent or rc.local)
+iptables -t nat -C POSTROUTING -s 10.200.0.0/24 -o eth0 -j MASQUERADE 2>/dev/null || \
+    iptables -t nat -A POSTROUTING -s 10.200.0.0/24 -o eth0 -j MASQUERADE
+
+# Save iptables rules
+mkdir -p /etc/iptables
+iptables-save > /etc/iptables/rules.v4
+
+# Create restore script for boot
+cat > /etc/rc.local << 'RCLOCAL'
+#!/bin/bash
+iptables-restore < /etc/iptables/rules.v4
+exit 0
+RCLOCAL
+chmod +x /etc/rc.local 2>/dev/null || true
+
+echo -e "${GREEN}✓ Firewall configured${NC}"
 
 echo -e "${BLUE}[DE] Starting AmneziaWG...${NC}"
 awg-quick down awg0 2>/dev/null || true
 awg-quick up awg0
+
+# Verify AmneziaWG is running
+sleep 1
+if ip link show awg0 > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ AmneziaWG interface awg0 is UP${NC}"
+    awg show
+else
+    echo -e "${RED}✗ AmneziaWG failed to start!${NC}"
+    exit 1
+fi
 
 echo -e "${GREEN}✓ DE server ready!${NC}"
 DESCRIPT
@@ -250,11 +276,21 @@ sshpass -p "$DE_PASS" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev
     -o LogLevel=ERROR /tmp/de_setup.sh "$DE_USER@$DE_IP:/tmp/"
 
 echo -e "${BLUE}[RU] Running setup on DE server...${NC}"
-ssh_de "bash /tmp/de_setup.sh '$RU_CLIENT_PUBLIC' '$VPN_PORT'"
+ssh_de "bash /tmp/de_setup.sh '$RU_CLIENT_PUBLIC' '$VPN_PORT' '$DE_IP'"
 
 # Get DE public key
 DE_PUBLIC_KEY=$(ssh_de "cat /etc/amnezia/amneziawg/de_public.key")
-echo -e "${GREEN}✓ Got DE public key${NC}"
+echo -e "${GREEN}✓ Got DE public key: ${DE_PUBLIC_KEY}${NC}"
+
+# Verify DE AmneziaWG is accessible
+echo -e "${BLUE}[RU] Verifying DE AmneziaWG status...${NC}"
+DE_AWG_STATUS=$(ssh_de "awg show 2>/dev/null || echo 'FAILED'")
+if echo "$DE_AWG_STATUS" | grep -q "peer"; then
+    echo -e "${GREEN}✓ DE AmneziaWG is running${NC}"
+else
+    echo -e "${RED}✗ DE AmneziaWG is NOT running properly${NC}"
+    echo "$DE_AWG_STATUS"
+fi
 echo ""
 
 # ============================================================
@@ -379,7 +415,7 @@ ufw allow 8080/tcp > /dev/null
 ufw allow 8443/tcp > /dev/null
 ufw allow 8000/tcp > /dev/null
 ufw allow ${VPN_PORT}/udp > /dev/null
-sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+ufw default allow FORWARD > /dev/null
 ufw --force enable > /dev/null
 echo -e "${GREEN}✓ Firewall configured${NC}"
 
@@ -400,15 +436,53 @@ awg-quick up awg0
 awg-quick down awg-client 2>/dev/null || true
 awg-quick up awg-client
 
+# FIXED: Add explicit route to tunnel subnet (Table=off doesn't add it)
+echo -e "${BLUE}[RU] Adding route to DE tunnel subnet...${NC}"
+ip route add 10.200.0.0/24 dev awg-client 2>/dev/null || true
+echo -e "${GREEN}✓ Route to 10.200.0.0/24 added${NC}"
+
+# Show routing table for debugging
+echo -e "${BLUE}[RU] Current routes to DE tunnel:${NC}"
+ip route show | grep -E "(awg-client|10.200)" || echo "No routes found"
+
+# Verify awg-client is up
+echo -e "${BLUE}[RU] Verifying awg-client interface...${NC}"
+if ip link show awg-client > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ awg-client interface is UP${NC}"
+    ip addr show awg-client | grep inet
+else
+    echo -e "${RED}✗ awg-client interface is DOWN${NC}"
+fi
+
+# Show AmneziaWG status
+echo -e "${BLUE}[RU] AmneziaWG status:${NC}"
+awg show
+
 /usr/local/bin/setup_routing.sh
 
-# Test tunnel
-sleep 2
-echo -e "${BLUE}[RU] Testing tunnel to DE...${NC}"
-if ping -c 3 10.200.0.1 > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ Tunnel to DE is working!${NC}"
-else
-    echo -e "${RED}✗ Tunnel test failed${NC}"
+# Test tunnel - try multiple times
+echo -e "${BLUE}[RU] Testing tunnel to DE (10.200.0.1)...${NC}"
+TUNNEL_OK=false
+for i in 1 2 3 4 5; do
+    sleep 2
+    if ping -c 2 -W 3 10.200.0.1 > /dev/null 2>&1; then
+        TUNNEL_OK=true
+        echo -e "${GREEN}✓ Tunnel to DE is working! (attempt $i)${NC}"
+        break
+    else
+        echo -e "${YELLOW}  Attempt $i failed, retrying...${NC}"
+    fi
+done
+
+if [ "$TUNNEL_OK" = false ]; then
+    echo -e "${RED}✗ Tunnel test failed after 5 attempts${NC}"
+    echo -e "${YELLOW}  Debugging info:${NC}"
+    echo -e "${YELLOW}  - RU awg-client status:${NC}"
+    awg show awg-client 2>/dev/null || echo "    Cannot show awg-client"
+    echo -e "${YELLOW}  - Routes:${NC}"
+    ip route show | grep -E "(awg|10.200)" || echo "    No relevant routes"
+    echo -e "${YELLOW}  - DE AmneziaWG status:${NC}"
+    ssh_de "awg show" 2>/dev/null || echo "    Cannot connect to DE"
 fi
 
 # Update KrotVPN
@@ -437,7 +511,7 @@ DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 cat > .env << EOF
 # === APPLICATION ===
 APP_NAME=KrotVPN
-APP_VERSION=2.2.1
+APP_VERSION=2.3.0
 DEBUG=false
 ENVIRONMENT=production
 HOST=0.0.0.0

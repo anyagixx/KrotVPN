@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.0] - 2026-03-22
+
+### Fixed
+- **CRITICAL**: Fixed VPN tunnel not working between RU and DE servers
+  - Fixed DE firewall: no longer overwrites /etc/ufw/before.rules (was breaking UFW)
+  - Added explicit route to 10.200.0.0/24 via awg-client (Table=off does not add it)
+  - Added verification that DE AmneziaWG is actually running
+  - Added retry logic for tunnel test (5 attempts with 2s delay)
+  - Added extensive debugging output if tunnel fails
+
+### Changed
+- DE firewall now uses iptables directly instead of modifying UFW before.rules
+- Added rc.local to restore iptables rules on boot on DE server
+- More verbose output during deployment for easier debugging
+
+
 ## [2.2.1] - 2026-03-22
 
 ### Fixed

@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.1] - 2026-03-21
+
+### Fixed
+- **CRITICAL**: Fixed deployment scripts dependency order (RU must be deployed before DE)
+- Rewrote `deploy-all.sh` - fully automated one-command deployment
+- Updated `quick-start.sh` - now calls deploy-all.sh correctly
+- Updated `deploy-ru-server.sh` - accepts DE_PUBLIC_KEY via environment variable
+- Updated `deploy-de-server.sh` - accepts RU_CLIENT_PUBLIC_KEY via environment variable
+- All scripts now work non-interactively when keys are provided via env vars
+
+### Changed
+- Deployment order: RU → DE → Link (was DE → RU which caused errors)
+- All apt commands now use `-qq` for cleaner output
+- Improved error messages and status indicators
+
 ## [2.0.0] - 2026-03-21
 
 ### Added

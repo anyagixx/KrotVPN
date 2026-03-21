@@ -18,10 +18,10 @@ export default function Settings() {
   const updateProfile = useMutation(
     (data: { name?: string; language?: string }) => userApi.updateProfile(data),
     {
-      onSuccess: ({ data }) => {
-        setUser(data)
-        i18n.changeLanguage(data.language)
-        localStorage.setItem('language', data.language)
+      onSuccess: (response: any) => {
+        setUser(response.data)
+        i18n.changeLanguage(response.data.language)
+        localStorage.setItem('language', response.data.language)
         toast.success(t('success'))
       },
       onError: () => toast.error(t('error')),

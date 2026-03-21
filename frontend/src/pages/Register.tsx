@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Mail, Lock, User, Loader2, Shield } from 'lucide-react'
+import { Mail, Lock, Loader2, Shield } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { authApi } from '../lib/api'
 

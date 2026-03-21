@@ -4,12 +4,10 @@ import { useTranslation } from 'react-i18next'
 import { Mail, Lock, Loader2, Shield } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { authApi } from '../lib/api'
-import { useAuthStore } from '../stores/auth'
 
 export default function Login() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const { setUser } = useAuthStore()
   
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -26,7 +24,7 @@ export default function Login() {
       localStorage.setItem('refresh_token', data.refresh_token)
       
       // Fetch user data
-      const { data: userData } = await authApi.refresh(data.refresh_token)
+      await authApi.refresh(data.refresh_token)
       
       toast.success(t('success'))
       navigate('/')

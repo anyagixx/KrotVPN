@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.1] - 2026-03-22
+
+### Fixed
+- Fixed TypeScript build errors in frontend
+  - Login.tsx: removed unused setUser and userData variables
+  - Register.tsx: removed unused User import
+  - Settings.tsx: fixed useMutation type annotations
+
+
 ## [2.3.0] - 2026-03-22
 
 ### Fixed

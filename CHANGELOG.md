@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.4] - 2026-03-22
+
+### Fixed
+- Fixed backend startup failure caused by importing billing response models from the wrong module
+- Restored billing router import resolution for `PlanResponse`, `PaymentResponse`, and `SubscriptionResponse`
+
 ## [2.4.3] - 2026-03-22
 
 ### Fixed

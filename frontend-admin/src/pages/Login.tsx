@@ -124,6 +124,10 @@ export default function Login() {
                 {loading ? 'Проверяем доступ' : 'Войти в консоль'}
               </button>
             </form>
+
+            <p className="mt-5 text-center text-sm muted lg:text-left">
+              Для операционной работы используй только административную учётную запись.
+            </p>
           </div>
         </section>
       </div>

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.13] - 2026-03-22
+
+### Improved
+- Unified the visual language of the user frontend and admin panel into one premium product style
+- Aligned admin layout, dashboard wording, server load states, and login experience with the redesigned main frontend
+- Polished cross-product consistency for surfaces, spacing, controls, and interaction states
+
 ## [2.4.12] - 2026-03-22
 
 ### Improved

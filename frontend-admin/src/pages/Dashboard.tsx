@@ -39,7 +39,7 @@ export default function Dashboard() {
         <div className="glass p-6 md:p-7">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-200/70">Today snapshot</p>
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-200/70">Оперативный срез</p>
               <h1 className="mt-3 text-4xl font-extrabold tracking-tight">Сервис под контролем</h1>
               <p className="mt-3 max-w-2xl text-sm muted">
                 Здесь собраны живые показатели по пользователям, подпискам и VPN-инфраструктуре.
@@ -48,7 +48,7 @@ export default function Dashboard() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="panel-soft px-4 py-4">
-                <p className="text-xs uppercase tracking-[0.18em] muted">Выручка total</p>
+                <p className="text-xs uppercase tracking-[0.18em] muted">Общая выручка</p>
                 <p className="mt-2 text-2xl font-bold">{formatCurrency(s?.revenue?.total)} ₽</p>
               </div>
               <div className="panel-soft px-4 py-4">
@@ -136,7 +136,7 @@ export default function Dashboard() {
         <div className="panel p-6">
           <div className="mb-5 flex items-center gap-3">
             <Activity className="h-5 w-5 text-cyan-200" />
-            <h3 className="text-lg font-semibold">VPN clients online</h3>
+            <h3 className="text-lg font-semibold">VPN клиенты</h3>
           </div>
           <p className="text-4xl font-extrabold">{s?.vpn?.active_clients || 0}</p>
           <p className="mt-2 text-sm muted">Количество активных клиентов с доступом к сети.</p>

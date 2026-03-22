@@ -5,7 +5,7 @@ import { adminApi } from '../lib/api'
 
 function getLoadTone(load?: number) {
   if ((load || 0) >= 80) return 'danger-pill'
-  if ((load || 0) >= 50) return 'inline-flex items-center rounded-full bg-yellow-300/10 px-3 py-1 text-xs font-semibold text-yellow-100'
+  if ((load || 0) >= 50) return 'warning-pill'
   return 'metric-pill'
 }
 

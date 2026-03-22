@@ -43,7 +43,7 @@ export default function Layout() {
   const meta = pageMeta[location.pathname] ?? pageMeta['/']
 
   return (
-    <div className="min-h-screen px-4 py-4 md:px-6 md:py-6">
+    <div className="app-shell">
       <div className="mx-auto grid min-h-[calc(100vh-2rem)] max-w-[1600px] grid-cols-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="glass flex flex-col overflow-hidden">
           <div className="border-b border-white/5 px-6 py-6">
@@ -54,7 +54,7 @@ export default function Layout() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.22em] text-emerald-200/75">KrotVPN</p>
                 <h1 className="text-xl font-extrabold">Admin Console</h1>
-                <p className="mt-1 text-sm muted">Панель управления VPN-сервисом</p>
+                <p className="mt-1 text-sm muted">Операционный кабинет сервиса</p>
               </div>
             </div>
           </div>
@@ -65,8 +65,8 @@ export default function Layout() {
                 <Activity className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm font-semibold">Control plane online</p>
-                <p className="text-xs muted">Backend отвечает, админ-маршруты активны</p>
+                <p className="text-sm font-semibold">Контур управления активен</p>
+                <p className="text-xs muted">Backend отвечает, админ-маршруты доступны</p>
               </div>
             </div>
           </div>
@@ -126,15 +126,15 @@ export default function Layout() {
 
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="panel-soft px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.18em] muted">Mode</p>
+                  <p className="text-xs uppercase tracking-[0.18em] muted">Среда</p>
                   <p className="mt-2 font-semibold text-emerald-200">Production</p>
                 </div>
                 <div className="panel-soft px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.18em] muted">Role</p>
+                  <p className="text-xs uppercase tracking-[0.18em] muted">Роль</p>
                   <p className="mt-2 font-semibold">{user?.role || 'admin'}</p>
                 </div>
                 <div className="panel-soft px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.18em] muted">Access</p>
+                  <p className="text-xs uppercase tracking-[0.18em] muted">Доступ</p>
                   <p className="mt-2 font-semibold text-cyan-100">Secure console</p>
                 </div>
               </div>

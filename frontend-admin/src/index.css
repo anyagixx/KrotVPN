@@ -6,21 +6,23 @@
 
 :root {
   color-scheme: dark;
-  --bg: #06131a;
-  --bg-elevated: rgba(10, 27, 34, 0.88);
-  --panel: rgba(14, 35, 44, 0.82);
-  --panel-strong: rgba(17, 44, 55, 0.94);
-  --border: rgba(154, 199, 214, 0.14);
-  --text: #eff8fb;
-  --muted: #8ea8b2;
-  --accent: #53d2b2;
-  --accent-2: #7de0cf;
-  --danger: #ff7d7d;
-  --shadow: 0 28px 80px rgba(2, 10, 14, 0.45);
+  --bg: #05131b;
+  --bg-soft: #0a1c25;
+  --panel: rgba(12, 30, 39, 0.84);
+  --panel-strong: rgba(13, 34, 44, 0.94);
+  --border: rgba(157, 203, 216, 0.14);
+  --text: #f0f8fb;
+  --muted: #8da6b0;
+  --accent: #5cd5b6;
+  --accent-2: #75c7ff;
+  --danger: #ff8f88;
+  --warning: #ffd77d;
+  --shadow: 0 30px 90px rgba(2, 10, 14, 0.42);
 }
 
 * {
   box-sizing: border-box;
+  @apply border-transparent;
 }
 
 html {
@@ -34,9 +36,10 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: 'Manrope', sans-serif;
+  font-family: 'Manrope', system-ui, sans-serif;
   color: var(--text);
   background: transparent;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 #root {
@@ -50,10 +53,14 @@ textarea {
   font: inherit;
 }
 
+.app-shell {
+  @apply min-h-screen px-4 py-4 md:px-6 md:py-6;
+}
+
 .glass {
-  background: linear-gradient(180deg, rgba(15, 38, 47, 0.92) 0%, rgba(10, 25, 32, 0.92) 100%);
+  background: linear-gradient(180deg, rgba(13, 34, 44, 0.94) 0%, rgba(8, 22, 29, 0.9) 100%);
   border: 1px solid var(--border);
-  border-radius: 24px;
+  border-radius: 28px;
   box-shadow: var(--shadow);
 }
 
@@ -65,26 +72,26 @@ textarea {
 }
 
 .panel-soft {
-  background: rgba(12, 31, 39, 0.68);
-  border: 1px solid rgba(154, 199, 214, 0.1);
-  border-radius: 20px;
+  background: rgba(12, 31, 39, 0.7);
+  border: 1px solid rgba(157, 203, 216, 0.1);
+  border-radius: 22px;
 }
 
 .btn-primary {
   @apply inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold text-slate-950 transition;
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
-  box-shadow: 0 14px 30px rgba(83, 210, 178, 0.26);
+  box-shadow: 0 14px 34px rgba(92, 213, 182, 0.24);
 }
 
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 18px 36px rgba(83, 210, 178, 0.32);
+  box-shadow: 0 18px 40px rgba(92, 213, 182, 0.3);
 }
 
 .btn-secondary {
   @apply inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold text-slate-100 transition;
   background: rgba(15, 35, 44, 0.8);
-  border: 1px solid rgba(154, 199, 214, 0.14);
+  border: 1px solid rgba(157, 203, 216, 0.14);
 }
 
 .btn-secondary:hover {
@@ -94,26 +101,26 @@ textarea {
 .btn-danger {
   @apply inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 font-semibold text-white transition;
   background: rgba(255, 125, 125, 0.14);
-  border: 1px solid rgba(255, 125, 125, 0.18);
+  border: 1px solid rgba(255, 143, 136, 0.22);
 }
 
 .btn-danger:hover {
-  background: rgba(255, 125, 125, 0.2);
+  background: rgba(255, 143, 136, 0.2);
 }
 
 .input {
   @apply w-full rounded-2xl px-4 py-3 text-sm text-slate-50 outline-none transition;
   background: rgba(7, 20, 26, 0.86);
-  border: 1px solid rgba(154, 199, 214, 0.16);
+  border: 1px solid rgba(157, 203, 216, 0.16);
 }
 
 .input::placeholder {
-  color: #6e8790;
+  color: #6b8791;
 }
 
 .input:focus {
-  border-color: rgba(125, 224, 207, 0.64);
-  box-shadow: 0 0 0 4px rgba(83, 210, 178, 0.11);
+  border-color: rgba(117, 199, 255, 0.55);
+  box-shadow: 0 0 0 4px rgba(117, 199, 255, 0.1);
 }
 
 .page-shell {
@@ -143,7 +150,7 @@ textarea {
 
 .data-table tbody td {
   @apply px-5 py-4 text-sm text-slate-100;
-  border-top: 1px solid rgba(154, 199, 214, 0.08);
+  border-top: 1px solid rgba(157, 203, 216, 0.08);
 }
 
 .data-table tbody tr:hover {
@@ -152,14 +159,20 @@ textarea {
 
 .metric-pill {
   @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold;
-  background: rgba(83, 210, 178, 0.12);
+  background: rgba(92, 213, 182, 0.12);
   color: #9ff0dc;
 }
 
 .danger-pill {
   @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold;
-  background: rgba(255, 125, 125, 0.12);
+  background: rgba(255, 143, 136, 0.12);
   color: #ffb2b2;
+}
+
+.warning-pill {
+  @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold;
+  background: rgba(255, 215, 125, 0.12);
+  color: #ffe2a0;
 }
 
 .muted {
@@ -168,16 +181,34 @@ textarea {
 
 .progress-track {
   @apply h-2 overflow-hidden rounded-full;
-  background: rgba(154, 199, 214, 0.12);
+  background: rgba(157, 203, 216, 0.12);
 }
 
 .progress-fill {
   @apply h-full rounded-full transition-all;
-  background: linear-gradient(90deg, #53d2b2 0%, #6fc6ff 100%);
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 100%);
 }
 
 .empty-state {
   @apply flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-[24px] border border-dashed p-8 text-center;
-  border-color: rgba(154, 199, 214, 0.14);
+  border-color: rgba(157, 203, 216, 0.14);
   background: rgba(7, 21, 28, 0.45);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(9, 25, 34, 0.55);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(112, 146, 158, 0.6);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(141, 166, 176, 0.85);
 }

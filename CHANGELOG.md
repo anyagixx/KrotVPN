@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.0] - 2026-03-22
+
+### Added
+- **Automatic Admin User Initialization**
+  - Admin user is now automatically created from `ADMIN_EMAIL` and `ADMIN_PASSWORD` environment variables
+  - Works on first startup - no manual database operations needed
+  - Security warning if default password is detected
+
+- **CLI Administration Tools** (`python -m app.cli`)
+  - `create-admin` - Create new admin user from command line
+  - `reset-password` - Reset admin password
+  - `list-admins` - List all admin users
+  - `check-config` - Validate admin configuration
+
+### Fixed
+- **CRITICAL**: Fixed admin login not working after installation
+  - Previously, `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` were ignored
+  - Admin user is now properly created on first application startup
+
+### Security
+- Added warning when default/weak admin password is detected
+- Password patterns like "changeme", "admin", "password" trigger security warning
+
+### Usage
+After installation, login to Admin Panel (`https://YOUR_IP:8443`) with:
+- **Email**: `admin@krotvpn.com` (or your custom `ADMIN_EMAIL`)
+- **Password**: `ChangeMeImmediately123!` (or your custom `ADMIN_PASSWORD`)
+
+⚠️ **Important**: Change the default password immediately after first login!
+
+### CLI Examples
+```bash
+# Create additional admin
+docker exec -it krotvpn-backend python -m app.cli create-admin -e admin2@example.com -p secret123
+
+# Reset admin password
+docker exec -it krotvpn-backend python -m app.cli reset-password -e admin@krotvpn.com -p newsecret
+
+# List all admins
+docker exec -it krotvpn-backend python -m app.cli list-admins
+
+# Check configuration
+docker exec -it krotvpn-backend python -m app.cli check-config
+```
+
+
 ## [2.3.1] - 2026-03-22
 
 ### Fixed

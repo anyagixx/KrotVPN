@@ -50,6 +50,17 @@ The installer will guide you through the setup process interactively.
 
 > ⚠️ **Note:** Your browser will warn about the self-signed certificate. Click "Advanced" → "Proceed" to continue.
 
+### Admin Panel Login
+
+Use these credentials to access the admin panel at `https://YOUR_RU_IP:8443`:
+
+| Field | Value |
+|-------|-------|
+| **Email** | `admin@krotvpn.com` |
+| **Password** | `ChangeMeImmediately123!` |
+
+> ⚠️ **Important**: Change the default password immediately after first login!
+
 ### Create VPN Client
 
 ```bash

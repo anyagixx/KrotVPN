@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# KrotVPN Server Deployment Script v2.3.1
+# KrotVPN Server Deployment Script v2.4.0
 # Run this script ON the RU server
 #
 
@@ -66,7 +66,7 @@ echo -e "${GREEN}[OK] RU IPv4: ${RU_IP}${NC}"
 # Print banner
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║           KrotVPN Automated Deployment v2.3.1               ║${NC}"
+echo -e "${CYAN}║           KrotVPN Automated Deployment v2.4.0               ║${NC}"
 echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${CYAN}║  RU Server (Entry): ${RU_IP}                            ║${NC}"
 echo -e "${CYAN}║  DE Server (Exit):  ${DE_IP}                            ║${NC}"
@@ -511,7 +511,7 @@ DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 cat > .env << EOF
 # === APPLICATION ===
 APP_NAME=KrotVPN
-APP_VERSION=2.3.1
+APP_VERSION=2.4.0
 DEBUG=false
 ENVIRONMENT=production
 HOST=0.0.0.0

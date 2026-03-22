@@ -2,7 +2,7 @@
 
 **Коммерческий VPN-сервис с обфускацией AmneziaWG и split-tunneling**
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue)
+![Version](https://img.shields.io/badge/version-2.4.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11-green)
 ![React](https://img.shields.io/badge/react-18-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -72,6 +72,35 @@ wget -qO- https://raw.githubusercontent.com/anyagixx/KrotVPN/main/install.sh | b
 | **Backend API** | `https://YOUR_RU_IP:8000` |
 
 > ⚠️ Браузер предупредит о самоподписанном сертификате. Нажмите "Дополнительно" → "Перейти".
+
+### 🔐 Доступ к Admin Panel
+
+После установки используйте следующие учётные данные:
+
+| Поле | Значение |
+|------|----------|
+| **Email** | `admin@krotvpn.com` |
+| **Password** | `ChangeMeImmediately123!` |
+
+> ⚠️ **Важно**: Смените пароль сразу после первого входа!
+
+### 🖥️ CLI инструменты
+
+Управление администраторами через командную строку:
+
+```bash
+# Создать нового админа
+docker exec -it krotvpn-backend python -m app.cli create-admin -e admin2@example.com -p secret123
+
+# Сбросить пароль
+docker exec -it krotvpn-backend python -m app.cli reset-password -e admin@krotvpn.com -p newsecret
+
+# Список всех админов
+docker exec -it krotvpn-backend python -m app.cli list-admins
+
+# Проверить конфигурацию
+docker exec -it krotvpn-backend python -m app.cli check-config
+```
 
 ## 📱 Клиентские приложения
 

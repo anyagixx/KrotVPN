@@ -16,7 +16,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.database import init_db, get_db_context
+from app.core.init_admin import ensure_admin_user
 
 # Import routers
 from app.users.router import router as auth_router
@@ -54,6 +55,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize database
     await init_db()
     logger.info("[APP] Database initialized")
+    
+    # Initialize admin user from environment variables
+    async with get_db_context() as session:
+        admin_user = await ensure_admin_user(session)
+        if admin_user:
+            logger.info(f"[APP] Admin user ready: {admin_user.email}")
+        else:
+            logger.info("[APP] No admin credentials configured in .env")
     
     # Initialize routing manager
     from app.routing import routing_manager

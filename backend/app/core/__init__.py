@@ -1,6 +1,12 @@
 """Core module exports."""
 from app.core.config import Settings, get_settings, settings
-from app.core.database import async_session_maker, engine, get_session, init_db
+from app.core.database import (
+    async_session_maker,
+    engine,
+    get_db_context,
+    get_session,
+    init_db,
+)
 from app.core.dependencies import (
     CurrentAdmin,
     CurrentSuperuser,
@@ -30,6 +36,7 @@ __all__ = [
     "engine",
     "async_session_maker",
     "get_session",
+    "get_db_context",
     "init_db",
     # Security
     "hash_password",

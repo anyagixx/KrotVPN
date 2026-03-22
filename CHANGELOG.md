@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.5] - 2026-03-22
+
+### Fixed
+- Fixed backend startup failure when file logging directory is not writable inside Docker
+- Backend now falls back gracefully instead of crashing on log file permission errors
+
 ## [2.4.4] - 2026-03-22
 
 ### Fixed

@@ -5,6 +5,7 @@ Main FastAPI application.
 # <!-- GRACE: entry-point="EP-001" -->
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
@@ -33,13 +34,18 @@ from app.referrals.router import admin_router as admin_referral_router
 from app.admin.router import router as admin_router
 
 # Configure logging
-logger.add(
-    "logs/krotvpn_{time}.log",
-    rotation="1 day",
-    retention="7 days",
-    level="INFO",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
-)
+try:
+    logs_dir = Path("logs")
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(
+        logs_dir / "krotvpn_{time}.log",
+        rotation="1 day",
+        retention="7 days",
+        level="INFO",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+    )
+except OSError as exc:
+    logger.warning(f"[APP] File logging disabled: {exc}")
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)

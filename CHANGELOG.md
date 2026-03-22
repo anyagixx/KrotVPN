@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.8] - 2026-03-22
+
+### Fixed
+- Fixed backend startup failure caused by bcrypt backend limitations during admin password hashing
+- Switched password hashing to `pbkdf2_sha256` to avoid bcrypt runtime failures in Docker
+
 ## [2.4.7] - 2026-03-22
 
 ### Fixed

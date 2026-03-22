@@ -3,7 +3,7 @@ User service for business logic.
 """
 # <!-- GRACE: module="M-002" contract="user-service" -->
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -105,7 +105,7 @@ class UserService:
                 existing.telegram_username = data.telegram_username
             if data.name:
                 existing.name = data.name
-            existing.last_login_at = datetime.now(timezone.utc)
+            existing.last_login_at = datetime.utcnow()
             await self.session.flush()
             return existing
 
@@ -144,7 +144,7 @@ class UserService:
             return None
 
         # Update last login
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = datetime.utcnow()
         await self.session.flush()
 
         return user
@@ -155,7 +155,7 @@ class UserService:
         for field, value in update_data.items():
             setattr(user, field, value)
 
-        user.updated_at = datetime.now(timezone.utc)
+        user.updated_at = datetime.utcnow()
         await self.session.flush()
         await self.session.refresh(user)
         return user
@@ -225,7 +225,7 @@ class UserService:
         from app.vpn.models import VPNClient
 
         # Get active subscription
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         active_sub_result = await self.session.execute(
             select(Subscription)
             .where(

@@ -3,7 +3,7 @@ Background tasks scheduler.
 """
 # <!-- GRACE: module="M-012" contract="scheduler" -->
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -78,7 +78,7 @@ async def check_subscription_expiry():
         from sqlalchemy import select, update
         from app.billing.models import Subscription, SubscriptionStatus
         
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         
         # Find expired but still active subscriptions
         result = await session.execute(
@@ -144,7 +144,7 @@ async def update_vpn_stats():
                 client.total_upload_bytes = peer_stats["upload"]
                 client.total_download_bytes = peer_stats["download"]
                 client.last_handshake_at = peer_stats["last_handshake"]
-                client.updated_at = datetime.now(timezone.utc)
+                client.updated_at = datetime.utcnow()
                 updated += 1
         
         await session.commit()
@@ -166,7 +166,7 @@ async def daily_cleanup():
         # Clean old failed payments (older than 30 days)
         from app.billing.models import Payment, PaymentStatus
         
-        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        cutoff = datetime.utcnow() - timedelta(days=30)
         
         result = await session.execute(
             delete(Payment)

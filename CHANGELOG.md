@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.10] - 2026-03-22
+
+### Fixed
+- Fixed PostgreSQL datetime errors caused by mixing timezone-aware and timezone-naive values
+- Standardized database-facing timestamps to naive UTC for services working with SQLModel/PostgreSQL
+
 ## [2.4.9] - 2026-03-22
 
 ### Fixed

@@ -3,7 +3,7 @@ Admin API router for analytics and management.
 """
 # <!-- GRACE: module="M-006" api-group="Admin API" -->
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Query
 from sqlalchemy import func, select
@@ -26,7 +26,7 @@ async def get_admin_stats(
     session: DBSession,
 ):
     """Get admin dashboard statistics."""
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     
     # Users count
@@ -104,7 +104,7 @@ async def get_revenue_analytics(
     days: int = Query(default=30, ge=1, le=365),
 ):
     """Get revenue analytics for the last N days."""
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     start_date = now - timedelta(days=days)
     
     # Daily revenue
@@ -144,7 +144,7 @@ async def get_users_analytics(
     days: int = Query(default=30, ge=1, le=365),
 ):
     """Get user registration analytics."""
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     start_date = now - timedelta(days=days)
     
     # Daily registrations

@@ -4,7 +4,7 @@ Billing API router.
 # <!-- GRACE: module="M-004" api-group="Billing API" -->
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, status
 from loguru import logger
@@ -83,7 +83,7 @@ async def get_subscription_status(
             is_recurring=False,
         )
     
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     days_left = max(0, (subscription.expires_at - now).days)
     
     # Get plan name
@@ -115,7 +115,7 @@ async def get_subscription_detail(
     if not subscription:
         return None
     
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     days_left = max(0, (subscription.expires_at - now).days)
     
     # Get plan name

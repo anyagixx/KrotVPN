@@ -4,7 +4,7 @@ Billing service for subscription and payment management.
 # <!-- GRACE: module="M-004" contract="billing-service" -->
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, func, select
@@ -72,7 +72,7 @@ class BillingService:
     
     async def get_user_subscription(self, user_id: int) -> Subscription | None:
         """Get user's active subscription."""
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         
         result = await self.session.execute(
             select(Subscription)
@@ -99,7 +99,7 @@ class BillingService:
     
     async def create_trial_subscription(self, user_id: int) -> Subscription:
         """Create a trial subscription for new user."""
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         expires_at = now + timedelta(days=settings.trial_days)
         
         subscription = Subscription(
@@ -126,7 +126,7 @@ class BillingService:
         payment: Payment | None = None,
     ) -> Subscription:
         """Create a subscription from a plan."""
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         
         # Check for existing active subscription
         existing = await self.get_user_subscription(user_id)
@@ -177,7 +177,7 @@ class BillingService:
         days: int,
     ) -> Subscription:
         """Extend a subscription by given days."""
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         
         # If expired, start from now
         base = max(subscription.expires_at, now)
@@ -289,7 +289,7 @@ class BillingService:
         # Update payment status
         if status == "succeeded":
             payment.status = PaymentStatus.SUCCEEDED
-            payment.paid_at = datetime.now(timezone.utc)
+            payment.paid_at = datetime.utcnow()
             
             # Create subscription
             plan = await self.get_plan(payment.plan_id)
@@ -316,7 +316,7 @@ class BillingService:
             payment.status = PaymentStatus.CANCELED
             logger.info(f"[BILLING] Payment {payment.id} canceled")
         
-        payment.updated_at = datetime.now(timezone.utc)
+        payment.updated_at = datetime.utcnow()
         await self.session.flush()
         
         return payment
@@ -337,7 +337,7 @@ class BillingService:
     
     async def get_subscription_stats(self) -> dict[str, Any]:
         """Get subscription statistics."""
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         
         # Active subscriptions
         active_result = await self.session.execute(

@@ -3,7 +3,7 @@ VPN service for business logic.
 """
 # <!-- GRACE: module="M-003" contract="vpn-service" -->
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -190,7 +190,7 @@ class VPNService:
             client.total_upload_bytes = peer_stats["upload"]
             client.total_download_bytes = peer_stats["download"]
             client.last_handshake_at = peer_stats["last_handshake"]
-            client.updated_at = datetime.now(timezone.utc)
+            client.updated_at = datetime.utcnow()
             await self.session.flush()
 
     async def get_client_stats(self, client: VPNClient) -> VPNStats:
@@ -202,7 +202,7 @@ class VPNService:
         # Check if connected (handshake within last 3 minutes)
         is_connected = False
         if client.last_handshake_at:
-            delta = datetime.now(timezone.utc) - client.last_handshake_at
+            delta = datetime.utcnow() - client.last_handshake_at
             is_connected = delta.total_seconds() < 180
         
         return VPNStats(
@@ -282,5 +282,5 @@ class VPNService:
         server = await self.get_server(server_id)
         if server:
             server.is_online = is_online
-            server.last_ping_at = datetime.now(timezone.utc)
+            server.last_ping_at = datetime.utcnow()
             await self.session.flush()

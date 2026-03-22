@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.2] - 2026-03-22
+
+### Fixed
+- Fixed backend startup failure caused by a circular import through `app.users.__init__`
+- Restored API availability for admin login and all frontend requests proxied to backend
+
 ## [2.4.1] - 2026-03-22
 
 ### Fixed

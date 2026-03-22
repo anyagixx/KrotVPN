@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from 'react-query'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Check, Copy, Download, FileCode2, Monitor, QrCode, Server, Smartphone } from 'lucide-react'
@@ -13,13 +13,21 @@ export default function Config() {
   const [showQR, setShowQR] = useState(false)
 
   const { data: configData, isLoading, error } = useQuery('vpn-config', () => vpnApi.getConfig())
-  const { data: qrData } = useQuery('vpn-qr', () => vpnApi.getQRCode(), { enabled: showQR })
+  const { data: qrData, isLoading: qrLoading, error: qrError } = useQuery('vpn-qr', () => vpnApi.getQRCode(), { enabled: showQR })
   const { data: serversData } = useQuery('vpn-servers', () => vpnApi.getServers())
 
   const qrUrl = useMemo(() => {
     if (!qrData?.data) return null
     return URL.createObjectURL(qrData.data)
   }, [qrData?.data])
+
+  useEffect(() => {
+    return () => {
+      if (qrUrl) {
+        URL.revokeObjectURL(qrUrl)
+      }
+    }
+  }, [qrUrl])
 
   const handleDownload = async () => {
     try {
@@ -39,7 +47,10 @@ export default function Config() {
   }
 
   const handleCopy = async () => {
-    if (!configData?.data?.config) return
+    if (!configData?.data?.config) {
+      toast.error('Конфигурация пока недоступна')
+      return
+    }
     await navigator.clipboard.writeText(configData.data.config)
     setCopied(true)
     toast.success(t('copied'))
@@ -192,8 +203,20 @@ export default function Config() {
               <div className="mt-6 rounded-[24px] bg-white p-5">
                 <img src={qrUrl} alt="QR Code" className="w-full rounded-2xl" />
               </div>
-            ) : (
+            ) : qrError ? (
+              <div className="empty-state mt-6 min-h-[200px]">
+                <AlertTriangle className="h-10 w-10 text-red-200" />
+                <div>
+                  <p className="text-lg font-semibold">QR-код не удалось получить</p>
+                  <p className="mt-1 text-sm muted">
+                    {((qrError as any)?.response?.data?.detail as string | undefined) || 'Попробуй скачать `.conf` или повторить позже.'}
+                  </p>
+                </div>
+              </div>
+            ) : qrLoading ? (
               <Loading text="Генерируем QR-код..." />
+            ) : (
+              <Loading text="Подготавливаем данные..." />
             )}
           </div>
         </div>

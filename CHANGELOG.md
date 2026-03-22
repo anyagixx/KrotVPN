@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.16] - 2026-03-22
+
+### Fixed
+- Fixed new user onboarding so trial accounts also provision a VPN client after registration
+- Fixed user config UX around QR generation and copy behavior when configuration is unavailable
+- Restored the expected register → dashboard → configuration flow for newly created accounts
+
 ## [2.4.15] - 2026-03-22
 
 ### Fixed

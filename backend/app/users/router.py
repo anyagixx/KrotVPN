@@ -48,16 +48,28 @@ async def _initialize_new_user_resources(
     referred_by_id: int | None,
     session: DBSession,
 ) -> None:
-    """Create trial and referral records for newly registered users."""
+    """Create trial, VPN access, and referral records for newly registered users."""
     from app.billing.service import BillingService
     from app.referrals.service import ReferralService
+    from app.vpn.service import VPNService
 
     billing_service = BillingService(session)
     referral_service = ReferralService(session)
+    vpn_service = VPNService(session)
 
     history = await billing_service.get_user_subscription_history(user_id, limit=1)
     if not history:
         await billing_service.create_trial_subscription(user_id)
+
+    existing_client = await vpn_service.get_user_client(user_id)
+    if not existing_client:
+        try:
+            await vpn_service.create_client(user_id)
+        except ValueError as exc:
+            # Registration should not fail if infrastructure is not ready yet.
+            # The UI will show a clear "config unavailable" state instead.
+            from loguru import logger
+            logger.warning(f"[AUTH] VPN client was not provisioned for user {user_id}: {exc}")
 
     if referred_by_id is not None:
         await referral_service.create_referral(referred_by_id, user_id)

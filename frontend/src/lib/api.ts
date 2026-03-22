@@ -113,6 +113,30 @@ export interface Plan {
   is_active: boolean
 }
 
+export interface SubscriptionStatus {
+  has_subscription: boolean
+  is_active: boolean
+  is_trial: boolean
+  plan_name: string | null
+  days_left: number
+  expires_at: string | null
+  is_recurring: boolean
+}
+
+export interface ReferralStats {
+  total_referrals: number
+  bonus_days_earned: number
+  paid_referrals?: number
+}
+
+export interface ReferralListItem {
+  id: number
+  bonus_given: boolean
+  bonus_days: number
+  created_at: string
+  first_payment_at: string | null
+}
+
 // Auth API
 export const authApi = {
   login: (email: string, password: string) =>
@@ -167,7 +191,7 @@ export const billingApi = {
     api.get<Plan[]>('/billing/plans'),
   
   getSubscription: () =>
-    api.get('/billing/subscription'),
+    api.get<SubscriptionStatus>('/billing/subscription'),
   
   createPayment: (plan_id: number) =>
     api.post('/billing/subscribe', { plan_id }),
@@ -179,5 +203,8 @@ export const referralApi = {
     api.get('/referrals/code'),
   
   getStats: () =>
-    api.get('/referrals/stats'),
+    api.get<ReferralStats>('/referrals/stats'),
+
+  getList: () =>
+    api.get<{ items: ReferralListItem[]; total: number }>('/referrals/list'),
 }

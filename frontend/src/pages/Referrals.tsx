@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from 'react-query'
 import { useTranslation } from 'react-i18next'
-import { Check, Copy, Gift, Link2, Users } from 'lucide-react'
+import { AlertTriangle, Check, Copy, Gift, Link2, Users } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { referralApi } from '../lib/api'
 import Loading from '../components/Loading'
@@ -12,6 +12,7 @@ export default function Referrals() {
 
   const { data, isLoading } = useQuery('referrals', () => referralApi.getCode())
   const { data: statsData } = useQuery('referral-stats', () => referralApi.getStats())
+  const { data: listData, isError } = useQuery('referral-list', () => referralApi.getList())
 
   if (isLoading) {
     return <Loading text={t('loading')} />
@@ -20,6 +21,7 @@ export default function Referrals() {
   const referralCode = data?.data?.code || ''
   const referralLink = `${window.location.origin}/register?ref=${referralCode}`
   const stats = statsData?.data
+  const referrals = listData?.data?.items || []
 
   const handleCopy = async (text: string) => {
     await navigator.clipboard.writeText(text)
@@ -93,6 +95,46 @@ export default function Referrals() {
         <h3 className="mt-4 text-2xl font-extrabold">{t('referralBonus', { days: 7 })}</h3>
         <p className="mt-2 text-sm text-slate-100">Каждый оплаченный реферал приносит тебе дополнительные 7 дней доступа.</p>
       </div>
+
+      {isError ? (
+        <div className="empty-state">
+          <AlertTriangle className="h-10 w-10 text-red-200" />
+          <div>
+            <p className="text-lg font-semibold">Не удалось загрузить историю рефералов</p>
+            <p className="mt-1 text-sm muted">Основной код работает, но список приглашений временно недоступен.</p>
+          </div>
+        </div>
+      ) : referrals.length > 0 ? (
+        <div className="panel p-6">
+          <h2 className="text-xl font-bold">Последние приглашения</h2>
+          <div className="mt-5 space-y-3">
+            {referrals.slice(0, 5).map((item) => (
+              <div key={item.id} className="panel-soft flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold">Реферал #{item.id}</p>
+                  <p className="mt-1 text-sm muted">Создан {new Date(item.created_at).toLocaleDateString('ru-RU')}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={item.bonus_given ? 'status-badge-success' : 'status-badge-warning'}>
+                    {item.bonus_given ? `Бонус начислен: +${item.bonus_days} дн.` : 'Ожидает первой оплаты'}
+                  </span>
+                  {item.first_payment_at ? (
+                    <span className="status-badge-success">Оплата {new Date(item.first_payment_at).toLocaleDateString('ru-RU')}</span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="empty-state">
+          <Users className="h-10 w-10 text-cyan-100" />
+          <div>
+            <p className="text-lg font-semibold">Рефералов пока нет</p>
+            <p className="mt-1 text-sm muted">Скопируй ссылку выше и отправь её первым приглашённым пользователям.</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

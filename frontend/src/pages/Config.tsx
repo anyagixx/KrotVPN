@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from 'react-query'
 import { useTranslation } from 'react-i18next'
-import { Check, Copy, Download, FileCode2, Monitor, QrCode, Smartphone } from 'lucide-react'
+import { AlertTriangle, Check, Copy, Download, FileCode2, Monitor, QrCode, Server, Smartphone } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { vpnApi } from '../lib/api'
 import Loading from '../components/Loading'
@@ -11,8 +12,9 @@ export default function Config() {
   const [copied, setCopied] = useState(false)
   const [showQR, setShowQR] = useState(false)
 
-  const { data: configData, isLoading } = useQuery('vpn-config', () => vpnApi.getConfig())
+  const { data: configData, isLoading, error } = useQuery('vpn-config', () => vpnApi.getConfig())
   const { data: qrData } = useQuery('vpn-qr', () => vpnApi.getQRCode(), { enabled: showQR })
+  const { data: serversData } = useQuery('vpn-servers', () => vpnApi.getServers())
 
   const qrUrl = useMemo(() => {
     if (!qrData?.data) return null
@@ -49,6 +51,76 @@ export default function Config() {
   }
 
   const config = configData?.data
+  const requestError = error as any
+  const errorMessage = requestError?.response?.data?.detail as string | undefined
+  const hasNoConfig = requestError?.response?.status === 404
+  const isForbidden = requestError?.response?.status === 403
+  const servers = serversData?.data?.servers || []
+
+  if (hasNoConfig || isForbidden) {
+    return (
+      <div className="content-section animate-in">
+        <div className="section-header">
+          <div>
+            <h1 className="section-title">{t('vpnConfig')}</h1>
+            <p className="section-subtitle">Конфигурация появится сразу после активации доступа и назначения VPN-клиента.</p>
+          </div>
+        </div>
+
+        <div className="glass p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-100/70">Configuration unavailable</p>
+              <h2 className="mt-3 text-2xl font-extrabold">
+                {isForbidden ? 'Доступ к VPN сейчас отключён' : 'Конфигурация ещё не выдана'}
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm muted">
+                {errorMessage || 'Сначала нужен активный доступ, после этого кабинет сможет выдать конфиг и QR-код.'}
+              </p>
+            </div>
+            <Link to="/subscription" className="btn-primary">
+              <Download className="h-5 w-5" />
+              Открыть подписку
+            </Link>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {servers.map((server: any) => (
+            <div key={server.id} className="metric-card">
+              <div className="flex items-center justify-between">
+                <span className="metric-label">Сервер</span>
+                <span className={server.is_online ? 'status-badge-success' : 'status-badge-error'}>
+                  {server.is_online ? 'online' : 'offline'}
+                </span>
+              </div>
+              <div className="mt-5 flex items-center gap-3">
+                <div className="rounded-2xl bg-white/8 p-3 text-cyan-100">
+                  <Server className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-bold">{server.name}</p>
+                  <p className="text-sm muted">{server.location}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (requestError) {
+    return (
+      <div className="empty-state">
+        <AlertTriangle className="h-10 w-10 text-red-200" />
+        <div>
+          <p className="text-lg font-semibold">Не удалось загрузить конфигурацию</p>
+          <p className="mt-1 text-sm muted">{errorMessage || 'Попробуй обновить страницу чуть позже.'}</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="content-section animate-in">

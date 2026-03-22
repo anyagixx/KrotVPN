@@ -1,6 +1,6 @@
 import { useQuery } from 'react-query'
 import { useTranslation } from 'react-i18next'
-import { ArrowDown, ArrowUp, Calendar, Clock, MapPin, Server, Shield, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, Calendar, Clock, Gift, MapPin, Server, Shield, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useAuthStore } from '../stores/auth'
 import { userApi, vpnApi } from '../lib/api'
@@ -10,14 +10,26 @@ export default function Dashboard() {
   const { t } = useTranslation()
   const { user } = useAuthStore()
 
-  const { data: vpnStats, isLoading: statsLoading } = useQuery('vpn-stats', () => vpnApi.getStats(), {
+  const { data: vpnStats, isLoading: statsLoading, isError: statsError } = useQuery('vpn-stats', () => vpnApi.getStats(), {
     refetchInterval: 10000,
   })
 
-  const { data: userStats, isLoading: userStatsLoading } = useQuery('user-stats', () => userApi.getStats())
+  const { data: userStats, isLoading: userStatsLoading, isError: userStatsError } = useQuery('user-stats', () => userApi.getStats())
 
   if (statsLoading || userStatsLoading) {
     return <Loading text={t('loading')} />
+  }
+
+  if (statsError || userStatsError) {
+    return (
+      <div className="empty-state">
+        <AlertTriangle className="h-10 w-10 text-red-200" />
+        <div>
+          <p className="text-lg font-semibold">Не удалось загрузить сводку</p>
+          <p className="mt-1 text-sm muted">Проверь доступность backend или обнови страницу позже.</p>
+        </div>
+      </div>
+    )
   }
 
   const stats = vpnStats?.data
@@ -101,6 +113,24 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {!uStats?.has_active_subscription ? (
+        <section className="glass p-6">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-100/70">Next step</p>
+              <h2 className="mt-3 text-2xl font-extrabold">Подключите подписку, чтобы получить рабочий конфиг</h2>
+              <p className="mt-2 max-w-2xl text-sm muted">
+                Пока доступ не активирован, кабинет показывает базовую статистику. После активации появятся `.conf`, QR-код и сервер.
+              </p>
+            </div>
+            <Link to="/subscription" className="btn-primary">
+              <Zap className="h-5 w-5" />
+              Выбрать тариф
+            </Link>
+          </div>
+        </section>
+      ) : null}
+
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <div className="panel p-6">
           <h2 className="text-xl font-bold">Сервер и соединение</h2>
@@ -150,7 +180,7 @@ export default function Dashboard() {
               Продлить или сменить тариф
             </Link>
             <Link to="/referrals" className="btn-secondary justify-start">
-              <span className="text-lg">🎁</span>
+              <Gift className="h-5 w-5" />
               Открыть реферальную программу
             </Link>
           </div>

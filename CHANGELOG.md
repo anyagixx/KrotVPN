@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.14] - 2026-03-22
+
+### Improved
+- Improved product UX across the user frontend for no-subscription, no-config, empty referral history, and API error states
+- Added clearer fallback messaging and action paths on dashboard, config, subscription, and referrals screens
+- Tightened frontend API typing for subscription and referral flows to support more reliable UI states
+
 ## [2.4.13] - 2026-03-22
 
 ### Improved

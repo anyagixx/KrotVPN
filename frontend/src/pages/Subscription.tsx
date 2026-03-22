@@ -1,6 +1,6 @@
 import { useQuery } from 'react-query'
 import { useTranslation } from 'react-i18next'
-import { Check, Crown, Rocket, ShieldCheck, Zap } from 'lucide-react'
+import { AlertTriangle, Check, Crown, Rocket, ShieldCheck, Zap } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { billingApi } from '../lib/api'
 import Loading from '../components/Loading'
@@ -14,11 +14,23 @@ const planIcons = {
 export default function Subscription() {
   const { t } = useTranslation()
 
-  const { data: plansData, isLoading: plansLoading } = useQuery('plans', () => billingApi.getPlans())
-  const { data: subData, isLoading: subLoading } = useQuery('subscription', () => billingApi.getSubscription())
+  const { data: plansData, isLoading: plansLoading, isError: plansError } = useQuery('plans', () => billingApi.getPlans())
+  const { data: subData, isLoading: subLoading, isError: subError } = useQuery('subscription', () => billingApi.getSubscription())
 
   if (plansLoading || subLoading) {
     return <Loading text={t('loading')} />
+  }
+
+  if (plansError || subError) {
+    return (
+      <div className="empty-state">
+        <AlertTriangle className="h-10 w-10 text-red-200" />
+        <div>
+          <p className="text-lg font-semibold">Не удалось загрузить тарифы</p>
+          <p className="mt-1 text-sm muted">Сервис оплаты или backend сейчас недоступен. Попробуй позже.</p>
+        </div>
+      </div>
+    )
   }
 
   const plans = plansData?.data || []
@@ -114,6 +126,16 @@ export default function Subscription() {
           )
         })}
       </section>
+
+      {plans.length === 0 ? (
+        <div className="empty-state">
+          <ShieldCheck className="h-10 w-10 text-cyan-100" />
+          <div>
+            <p className="text-lg font-semibold">Активные планы пока не опубликованы</p>
+            <p className="mt-1 text-sm muted">Когда администратор добавит тарифы, они появятся здесь автоматически.</p>
+          </div>
+        </div>
+      ) : null}
 
       {!subscription?.has_subscription ? (
         <section className="glass p-6 text-center">

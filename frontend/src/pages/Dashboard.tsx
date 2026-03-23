@@ -1,6 +1,6 @@
 import { useQuery } from 'react-query'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowDown, ArrowUp, Calendar, Clock, Gift, MapPin, Server, Shield, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowRightLeft, ArrowUp, Calendar, Clock, Gift, MapPin, Server, Shield, Zap } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useAuthStore } from '../stores/auth'
 import { userApi, vpnApi } from '../lib/api'
@@ -15,6 +15,9 @@ export default function Dashboard() {
   })
 
   const { data: userStats, isLoading: userStatsLoading, isError: userStatsError } = useQuery('user-stats', () => userApi.getStats())
+  const { data: vpnConfig } = useQuery('vpn-config-summary', () => vpnApi.getConfig(), {
+    retry: false,
+  })
 
   if (statsLoading || userStatsLoading) {
     return <Loading text={t('loading')} />
@@ -34,6 +37,12 @@ export default function Dashboard() {
 
   const stats = vpnStats?.data
   const uStats = userStats?.data
+  const config = vpnConfig?.data
+  const routeName = config?.route_name
+  const entryLocation = config?.entry_server_location || stats?.server_location
+  const entryName = config?.entry_server_name || stats?.server_name
+  const exitName = config?.exit_server_name
+  const exitLocation = config?.exit_server_location
 
   return (
     <div className="content-section animate-in">
@@ -78,7 +87,7 @@ export default function Dashboard() {
             </div>
             <div>
               <p className="font-bold">{stats?.is_connected ? t('connected') : t('disconnected')}</p>
-              <p className="text-sm muted">{stats?.server_location || 'Сервер ещё не назначен'}</p>
+              <p className="text-sm muted">{entryLocation || 'Сервер ещё не назначен'}</p>
             </div>
           </div>
         </div>
@@ -134,13 +143,13 @@ export default function Dashboard() {
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
         <div className="panel p-6">
           <h2 className="text-xl font-bold">Сервер и соединение</h2>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
+          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <div className="panel-soft px-4 py-4">
               <div className="flex items-center gap-3">
                 <Server className="h-5 w-5 text-cyan-100" />
                 <div>
-                  <p className="text-sm muted">{t('server')}</p>
-                  <p className="mt-1 font-semibold">{stats?.server_name || 'Ожидает активации'}</p>
+                  <p className="text-sm muted">Entry node</p>
+                  <p className="mt-1 font-semibold">{entryName || 'Ожидает активации'}</p>
                 </div>
               </div>
             </div>
@@ -148,8 +157,31 @@ export default function Dashboard() {
               <div className="flex items-center gap-3">
                 <MapPin className="h-5 w-5 text-cyan-100" />
                 <div>
-                  <p className="text-sm muted">{t('location')}</p>
-                  <p className="mt-1 font-semibold">{stats?.server_location || 'Не выбрано'}</p>
+                  <p className="text-sm muted">Entry location</p>
+                  <p className="mt-1 font-semibold">{entryLocation || 'Не выбрано'}</p>
+                </div>
+              </div>
+            </div>
+            <div className="panel-soft px-4 py-4">
+              <div className="flex items-center gap-3">
+                <ArrowRightLeft className="h-5 w-5 text-cyan-100" />
+                <div>
+                  <p className="text-sm muted">Маршрут</p>
+                  <p className="mt-1 font-semibold">{routeName || 'Legacy single-node'}</p>
+                  <p className="mt-1 text-sm muted">
+                    {exitName ? `${entryName || 'Entry'} -> ${exitName}` : 'Выходной узел пока не задан'}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="panel-soft px-4 py-4">
+              <div className="flex items-center gap-3">
+                <MapPin className="h-5 w-5 text-cyan-100" />
+                <div>
+                  <p className="text-sm muted">Exit location</p>
+                  <p className="mt-1 font-semibold">
+                    {exitLocation || 'Не задано'}
+                  </p>
                 </div>
               </div>
             </div>

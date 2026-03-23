@@ -71,6 +71,19 @@ class Settings(BaseSettings):
     vpn_server_name: str = "RU Entry Node"
     vpn_server_location: str = "Russia"
     vpn_server_max_clients: int = 500
+    vpn_entry_server_public_key: str | None = None
+    vpn_entry_server_endpoint: str | None = None
+    vpn_entry_server_name: str = "RU Entry Node"
+    vpn_entry_server_location: str = "Russia"
+    vpn_entry_server_country_code: str = "RU"
+    vpn_entry_server_max_clients: int = 500
+    vpn_exit_server_public_key: str | None = None
+    vpn_exit_server_endpoint: str | None = None
+    vpn_exit_server_name: str = "DE Exit Node"
+    vpn_exit_server_location: str = "Germany"
+    vpn_exit_server_country_code: str = "DE"
+    vpn_exit_server_max_clients: int = 500
+    vpn_default_route_name: str = "RU -> DE"
 
     # AmneziaWG Obfuscation Parameters (MUST match legacy)
     awg_jc: int = 120

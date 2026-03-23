@@ -51,6 +51,30 @@ export const adminApi = {
   
   getServers: () =>
     api.get('/admin/servers'),
+
+  getNodes: () =>
+    api.get('/admin/nodes'),
+
+  createNode: (data: any) =>
+    api.post('/admin/nodes', data),
+
+  updateNode: (id: number, data: any) =>
+    api.put(`/admin/nodes/${id}`, data),
+
+  deleteNode: (id: number) =>
+    api.delete(`/admin/nodes/${id}`),
+
+  getRoutes: () =>
+    api.get('/admin/routes'),
+
+  createRoute: (data: any) =>
+    api.post('/admin/routes', data),
+
+  updateRoute: (id: number, data: any) =>
+    api.put(`/admin/routes/${id}`, data),
+
+  deleteRoute: (id: number) =>
+    api.delete(`/admin/routes/${id}`),
   
   createServer: (data: any) =>
     api.post('/admin/servers', data),

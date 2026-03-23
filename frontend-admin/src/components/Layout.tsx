@@ -15,7 +15,7 @@ import { useAuthStore } from '../stores/auth'
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Обзор', hint: 'Статистика и состояние' },
   { to: '/users', icon: Users, label: 'Пользователи', hint: 'Аккаунты и роли' },
-  { to: '/servers', icon: Server, label: 'Серверы', hint: 'VPN узлы и нагрузка' },
+  { to: '/servers', icon: Server, label: 'Ноды и маршруты', hint: 'Entry, exit и route topology' },
   { to: '/plans', icon: CreditCard, label: 'Тарифы', hint: 'Подписки и цены' },
   { to: '/analytics', icon: BarChart3, label: 'Аналитика', hint: 'Выручка и конверсия' },
   { to: '/settings', icon: Settings, label: 'Настройки', hint: 'Системные параметры' },
@@ -24,7 +24,7 @@ const navItems = [
 const pageMeta: Record<string, { title: string; description: string }> = {
   '/': { title: 'Операционный центр', description: 'Контроль подписок, серверов и живого состояния сервиса.' },
   '/users': { title: 'Пользователи', description: 'Поиск, фильтрация и аудит аккаунтов.' },
-  '/servers': { title: 'Серверы', description: 'Сеть узлов, ёмкость и готовность инфраструктуры.' },
+  '/servers': { title: 'Ноды и маршруты', description: 'Физические узлы и логические цепочки, по которым выдаётся трафик клиентам.' },
   '/plans': { title: 'Тарифы', description: 'Текущие подписки и конфигурация продуктовой линейки.' },
   '/analytics': { title: 'Аналитика', description: 'Ключевые метрики роста и монетизации.' },
   '/settings': { title: 'Настройки', description: 'Базовые параметры инсталляции и реферальной модели.' },

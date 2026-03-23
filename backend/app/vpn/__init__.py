@@ -1,5 +1,5 @@
 """VPN module exports."""
-from app.vpn.models import VPNClient, VPNConfig, VPNServer, VPNStats, ServerStatus
+from app.vpn.models import VPNClient, VPNConfig, VPNServer, VPNStats
 from app.vpn.amneziawg import AmneziaWGManager, wg_manager
 from app.vpn.service import VPNService
 from app.vpn.router import router as vpn_router
@@ -11,7 +11,6 @@ __all__ = [
     "VPNServer",
     "VPNConfig",
     "VPNStats",
-    "ServerStatus",
     # AmneziaWG
     "AmneziaWGManager",
     "wg_manager",

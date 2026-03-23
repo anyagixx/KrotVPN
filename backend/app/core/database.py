@@ -76,6 +76,10 @@ def _partition_vpn_client_rows(
 
 async def migrate_existing_schema(conn) -> None:
     """Apply lightweight compatibility migrations for already deployed databases."""
+    await _ensure_vpn_client_topology_columns(conn)
+    await _migrate_legacy_vpn_servers_to_nodes(conn)
+    await _migrate_legacy_vpn_clients_to_topology(conn)
+    await _sync_vpn_topology_client_counts(conn)
     await _deduplicate_vpn_clients(conn)
     await _ensure_unique_vpn_client_user_id(conn)
 
@@ -148,7 +152,11 @@ async def _sync_vpn_server_client_counts(conn) -> None:
             """
         )
     )
-    server_counts = {int(row["server_id"]): int(row["current_clients"]) for row in counts_result.mappings()}
+    server_counts = {
+        int(row["server_id"]): int(row["current_clients"])
+        for row in counts_result.mappings()
+        if row["server_id"] is not None
+    }
 
     await conn.execute(text("UPDATE vpn_servers SET current_clients = 0"))
     for server_id, current_clients in server_counts.items():
@@ -181,6 +189,388 @@ async def _ensure_unique_vpn_client_user_id(conn) -> None:
     logger.info("[DB] Ensured unique index for vpn_clients.user_id")
 
 
+async def _ensure_vpn_client_topology_columns(conn) -> None:
+    """Add nullable topology columns to vpn_clients on already deployed databases."""
+    has_vpn_clients = await conn.run_sync(_table_exists, "vpn_clients")
+    if not has_vpn_clients:
+        return
+
+    for column_name in ("route_id", "entry_node_id", "exit_node_id"):
+        has_column = await conn.run_sync(_table_has_column, "vpn_clients", column_name)
+        if has_column:
+            continue
+
+        await conn.execute(
+            text(f"ALTER TABLE vpn_clients ADD COLUMN {column_name} INTEGER")
+        )
+        await conn.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS ix_vpn_clients_{column_name} "
+                f"ON vpn_clients ({column_name})"
+            )
+        )
+        logger.info(f"[DB] Added vpn_clients.{column_name} compatibility column")
+
+
+async def _migrate_legacy_vpn_servers_to_nodes(conn) -> None:
+    """Mirror deprecated vpn_servers rows into vpn_nodes during the migration window."""
+    has_vpn_servers = await conn.run_sync(_table_exists, "vpn_servers")
+    has_vpn_nodes = await conn.run_sync(_table_exists, "vpn_nodes")
+    if not has_vpn_servers or not has_vpn_nodes:
+        return
+
+    result = await conn.execute(
+        text(
+            """
+            SELECT
+                id,
+                name,
+                location,
+                endpoint,
+                port,
+                public_key,
+                private_key_enc,
+                is_active,
+                is_entry_node,
+                is_exit_node,
+                max_clients,
+                current_clients,
+                last_ping_at,
+                is_online,
+                created_at,
+                updated_at
+            FROM vpn_servers
+            ORDER BY id ASC
+            """
+        )
+    )
+    rows = list(result.mappings())
+    if not rows:
+        return
+
+    inserted = 0
+    for row in rows:
+        existing = await conn.execute(
+            text("SELECT id FROM vpn_nodes WHERE public_key = :public_key"),
+            {"public_key": row["public_key"]},
+        )
+        if existing.scalar_one_or_none() is not None:
+            continue
+
+        await conn.execute(
+            text(
+                """
+                INSERT INTO vpn_nodes (
+                    name,
+                    role,
+                    country_code,
+                    location,
+                    endpoint,
+                    port,
+                    public_key,
+                    private_key_enc,
+                    is_active,
+                    is_online,
+                    is_entry_node,
+                    is_exit_node,
+                    max_clients,
+                    current_clients,
+                    last_ping_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    :name,
+                    :role,
+                    :country_code,
+                    :location,
+                    :endpoint,
+                    :port,
+                    :public_key,
+                    :private_key_enc,
+                    :is_active,
+                    :is_online,
+                    :is_entry_node,
+                    :is_exit_node,
+                    :max_clients,
+                    :current_clients,
+                    :last_ping_at,
+                    :created_at,
+                    :updated_at
+                )
+                """
+            ),
+            {
+                "name": row["name"],
+                "role": _legacy_node_role(
+                    bool(row["is_entry_node"]),
+                    bool(row["is_exit_node"]),
+                ),
+                "country_code": _country_code_for_location(str(row["location"])),
+                "location": row["location"],
+                "endpoint": row["endpoint"],
+                "port": row["port"],
+                "public_key": row["public_key"],
+                "private_key_enc": row["private_key_enc"],
+                "is_active": row["is_active"],
+                "is_online": row["is_online"],
+                "is_entry_node": row["is_entry_node"],
+                "is_exit_node": row["is_exit_node"],
+                "max_clients": row["max_clients"],
+                "current_clients": row["current_clients"],
+                "last_ping_at": row["last_ping_at"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            },
+        )
+        inserted += 1
+
+    if inserted:
+        logger.info(f"[DB] Mirrored {inserted} legacy vpn_servers rows into vpn_nodes")
+
+
+async def _migrate_legacy_vpn_clients_to_topology(conn) -> None:
+    """Backfill vpn_clients route, entry, and exit columns from legacy server records."""
+    has_vpn_clients = await conn.run_sync(_table_exists, "vpn_clients")
+    has_vpn_routes = await conn.run_sync(_table_exists, "vpn_routes")
+    if not has_vpn_clients or not has_vpn_routes:
+        return
+
+    server_map_result = await conn.execute(
+        text(
+            """
+            SELECT vs.id AS server_id, vn.id AS node_id, vs.name AS server_name, vs.max_clients
+            FROM vpn_servers vs
+            JOIN vpn_nodes vn ON vn.public_key = vs.public_key
+            """
+        )
+    )
+    server_map = {
+        int(row["server_id"]): {
+            "node_id": int(row["node_id"]),
+            "server_name": str(row["server_name"]),
+            "max_clients": int(row["max_clients"]),
+        }
+        for row in server_map_result.mappings()
+    }
+    if not server_map:
+        return
+
+    legacy_route_ids: dict[int, int] = {}
+    for server_id, server_data in server_map.items():
+        route_id = await _ensure_legacy_route(
+            conn,
+            entry_node_id=server_data["node_id"],
+            server_name=server_data["server_name"],
+            max_clients=server_data["max_clients"],
+        )
+        legacy_route_ids[server_id] = route_id
+
+    clients_result = await conn.execute(
+        text(
+            """
+            SELECT id, server_id, route_id, entry_node_id, exit_node_id
+            FROM vpn_clients
+            ORDER BY id ASC
+            """
+        )
+    )
+    updated = 0
+    for row in clients_result.mappings():
+        if row["server_id"] is None:
+            continue
+        server_id = int(row["server_id"])
+        server_data = server_map.get(server_id)
+        if server_data is None:
+            continue
+
+        route_id = int(row["route_id"]) if row["route_id"] is not None else legacy_route_ids[server_id]
+        entry_node_id = (
+            int(row["entry_node_id"])
+            if row["entry_node_id"] is not None
+            else server_data["node_id"]
+        )
+        exit_node_id = int(row["exit_node_id"]) if row["exit_node_id"] is not None else None
+
+        if (
+            row["route_id"] == route_id
+            and row["entry_node_id"] == entry_node_id
+            and row["exit_node_id"] == exit_node_id
+        ):
+            continue
+
+        await conn.execute(
+            text(
+                """
+                UPDATE vpn_clients
+                SET route_id = :route_id,
+                    entry_node_id = :entry_node_id,
+                    exit_node_id = :exit_node_id
+                WHERE id = :client_id
+                """
+            ),
+            {
+                "client_id": int(row["id"]),
+                "route_id": route_id,
+                "entry_node_id": entry_node_id,
+                "exit_node_id": exit_node_id,
+            },
+        )
+        updated += 1
+
+    if updated:
+        logger.info(f"[DB] Backfilled topology fields for {updated} vpn_clients rows")
+
+
+async def _sync_vpn_topology_client_counts(conn) -> None:
+    """Recalculate vpn_nodes and vpn_routes client counters from vpn_clients."""
+    has_vpn_clients = await conn.run_sync(_table_exists, "vpn_clients")
+    has_vpn_nodes = await conn.run_sync(_table_exists, "vpn_nodes")
+    has_vpn_routes = await conn.run_sync(_table_exists, "vpn_routes")
+    if not has_vpn_clients:
+        return
+
+    if has_vpn_nodes:
+        await conn.execute(text("UPDATE vpn_nodes SET current_clients = 0"))
+
+        entry_counts_result = await conn.execute(
+            text(
+                """
+                SELECT entry_node_id, COUNT(*) AS current_clients
+                FROM vpn_clients
+                WHERE is_active = TRUE AND entry_node_id IS NOT NULL
+                GROUP BY entry_node_id
+                """
+            )
+        )
+        for row in entry_counts_result.mappings():
+            await conn.execute(
+                text(
+                    """
+                    UPDATE vpn_nodes
+                    SET current_clients = current_clients + :current_clients
+                    WHERE id = :node_id
+                    """
+                ),
+                {
+                    "node_id": int(row["entry_node_id"]),
+                    "current_clients": int(row["current_clients"]),
+                },
+            )
+
+        exit_counts_result = await conn.execute(
+            text(
+                """
+                SELECT exit_node_id, COUNT(*) AS current_clients
+                FROM vpn_clients
+                WHERE is_active = TRUE AND exit_node_id IS NOT NULL
+                GROUP BY exit_node_id
+                """
+            )
+        )
+        for row in exit_counts_result.mappings():
+            await conn.execute(
+                text(
+                    """
+                    UPDATE vpn_nodes
+                    SET current_clients = current_clients + :current_clients
+                    WHERE id = :node_id
+                    """
+                ),
+                {
+                    "node_id": int(row["exit_node_id"]),
+                    "current_clients": int(row["current_clients"]),
+                },
+            )
+
+    if has_vpn_routes:
+        await conn.execute(text("UPDATE vpn_routes SET current_clients = 0"))
+        route_counts_result = await conn.execute(
+            text(
+                """
+                SELECT route_id, COUNT(*) AS current_clients
+                FROM vpn_clients
+                WHERE is_active = TRUE AND route_id IS NOT NULL
+                GROUP BY route_id
+                """
+            )
+        )
+        for row in route_counts_result.mappings():
+            await conn.execute(
+                text(
+                    """
+                    UPDATE vpn_routes
+                    SET current_clients = :current_clients
+                    WHERE id = :route_id
+                    """
+                ),
+                {
+                    "route_id": int(row["route_id"]),
+                    "current_clients": int(row["current_clients"]),
+                },
+            )
+
+
+async def _ensure_legacy_route(
+    conn,
+    *,
+    entry_node_id: int,
+    server_name: str,
+    max_clients: int,
+) -> int:
+    """Create a compatibility route for legacy single-hop server records."""
+    route_name = f"Legacy: {server_name}"
+    existing = await conn.execute(
+        text("SELECT id FROM vpn_routes WHERE name = :name"),
+        {"name": route_name},
+    )
+    route_id = existing.scalar_one_or_none()
+    if route_id is not None:
+        return int(route_id)
+
+    await conn.execute(
+        text(
+            """
+            INSERT INTO vpn_routes (
+                name,
+                entry_node_id,
+                exit_node_id,
+                is_active,
+                is_default,
+                priority,
+                max_clients,
+                current_clients,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                :name,
+                :entry_node_id,
+                NULL,
+                TRUE,
+                FALSE,
+                1000,
+                :max_clients,
+                0,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            )
+            """
+        ),
+        {
+            "name": route_name,
+            "entry_node_id": entry_node_id,
+            "max_clients": max_clients,
+        },
+    )
+    inserted = await conn.execute(
+        text("SELECT id FROM vpn_routes WHERE name = :name"),
+        {"name": route_name},
+    )
+    route_id = inserted.scalar_one()
+    return int(route_id)
+
+
 def _has_unique_vpn_client_user_id(sync_conn) -> bool:
     """Check whether vpn_clients.user_id is already uniquely constrained."""
     inspector = inspect(sync_conn)
@@ -196,6 +586,51 @@ def _has_unique_vpn_client_user_id(sync_conn) -> bool:
             return True
 
     return False
+
+
+def _table_exists(sync_conn, table_name: str) -> bool:
+    """Check whether a table already exists."""
+    inspector = inspect(sync_conn)
+    return table_name in inspector.get_table_names()
+
+
+def _table_has_column(sync_conn, table_name: str, column_name: str) -> bool:
+    """Check whether a table contains the requested column."""
+    inspector = inspect(sync_conn)
+    if table_name not in inspector.get_table_names():
+        return False
+
+    columns = inspector.get_columns(table_name)
+    return any(column["name"] == column_name for column in columns)
+
+
+def _legacy_node_role(is_entry_node: bool, is_exit_node: bool) -> str:
+    """Convert legacy booleans to the new stable node role string."""
+    if is_entry_node and is_exit_node:
+        return "combined"
+    if is_exit_node:
+        return "exit"
+    return "entry"
+
+
+def _country_code_for_location(location: str) -> str:
+    """Best-effort country code inference for legacy location strings."""
+    normalized = location.strip().lower()
+    mapping = {
+        "russia": "RU",
+        "russian": "RU",
+        "germany": "DE",
+        "deutschland": "DE",
+        "netherlands": "NL",
+        "holland": "NL",
+        "finland": "FI",
+        "france": "FR",
+        "poland": "PL",
+    }
+    for needle, country_code in mapping.items():
+        if needle in normalized:
+            return country_code
+    return "ZZ"
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

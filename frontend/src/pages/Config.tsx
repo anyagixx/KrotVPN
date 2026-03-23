@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from 'react-query'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, Check, Copy, Download, FileCode2, Monitor, QrCode, Server, Smartphone } from 'lucide-react'
+import { AlertTriangle, ArrowRightLeft, Check, Download, FileCode2, Monitor, QrCode, Smartphone } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { vpnApi } from '../lib/api'
@@ -14,7 +14,7 @@ export default function Config() {
 
   const { data: configData, isLoading, error } = useQuery('vpn-config', () => vpnApi.getConfig())
   const { data: qrData, isLoading: qrLoading, error: qrError } = useQuery('vpn-qr', () => vpnApi.getQRCode(), { enabled: showQR })
-  const { data: serversData } = useQuery('vpn-servers', () => vpnApi.getServers())
+  const { data: routesData } = useQuery('vpn-routes', () => vpnApi.getRoutes())
 
   const qrUrl = useMemo(() => {
     if (!qrData?.data) return null
@@ -66,7 +66,12 @@ export default function Config() {
   const errorMessage = requestError?.response?.data?.detail as string | undefined
   const hasNoConfig = requestError?.response?.status === 404
   const isForbidden = requestError?.response?.status === 403
-  const servers = serversData?.data?.servers || []
+  const routes = routesData?.data?.routes || []
+  const routeName = config?.route_name
+  const entryName = config?.entry_server_name || config?.server_name
+  const entryLocation = config?.entry_server_location || config?.server_location
+  const exitName = config?.exit_server_name
+  const exitLocation = config?.exit_server_location
 
   if (hasNoConfig || isForbidden) {
     return (
@@ -97,21 +102,21 @@ export default function Config() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {servers.map((server: any) => (
-            <div key={server.id} className="metric-card">
+          {routes.map((route: any) => (
+            <div key={route.id} className="metric-card">
               <div className="flex items-center justify-between">
-                <span className="metric-label">Сервер</span>
-                <span className={server.is_online ? 'status-badge-success' : 'status-badge-error'}>
-                  {server.is_online ? 'online' : 'offline'}
+                <span className="metric-label">Маршрут</span>
+                <span className={route.tunnel_status === 'up' ? 'status-badge-success' : 'status-badge-error'}>
+                  {route.tunnel_status === 'up' ? 'tunnel up' : route.tunnel_status}
                 </span>
               </div>
               <div className="mt-5 flex items-center gap-3">
                 <div className="rounded-2xl bg-white/8 p-3 text-cyan-100">
-                  <Server className="h-5 w-5" />
+                  <ArrowRightLeft className="h-5 w-5" />
                 </div>
                 <div>
-                  <p className="font-bold">{server.name}</p>
-                  <p className="text-sm muted">{server.location}</p>
+                  <p className="font-bold">{route.name}</p>
+                  <p className="text-sm muted">{route.entry_node_name} -&gt; {route.exit_node_name || 'Exit not set'}</p>
                 </div>
               </div>
             </div>
@@ -252,19 +257,67 @@ export default function Config() {
       </div>
 
       {config ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <div className="metric-card">
-            <p className="metric-label">Сервер</p>
-            <p className="metric-value text-2xl">{config.server_name}</p>
+            <p className="metric-label">Маршрут</p>
+            <p className="metric-value text-2xl">{routeName || 'Legacy single-node'}</p>
           </div>
           <div className="metric-card">
-            <p className="metric-label">Локация</p>
-            <p className="metric-value text-2xl">{config.server_location}</p>
+            <p className="metric-label">Entry node</p>
+            <p className="metric-value text-2xl">{entryName}</p>
+          </div>
+          <div className="metric-card">
+            <p className="metric-label">Entry location</p>
+            <p className="metric-value text-2xl">{entryLocation}</p>
+          </div>
+          <div className="metric-card">
+            <p className="metric-label">Exit</p>
+            <p className="metric-value text-2xl">{exitName || 'Не задан'}</p>
+            <p className="mt-2 text-sm muted">{exitLocation || 'Маршрут ещё не замкнут'}</p>
           </div>
           <div className="metric-card">
             <p className="metric-label">VPN IP</p>
             <p className="metric-value text-2xl">{config.address}</p>
           </div>
+        </div>
+      ) : null}
+
+      {config ? (
+        <div className="panel p-6">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="rounded-2xl bg-white/8 p-3 text-cyan-100">
+              <ArrowRightLeft className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold">Топология маршрута</h2>
+              <p className="text-sm muted">Клиент подключается к entry-ноде, а внешний трафик выходит через exit-ноду.</p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="panel-soft px-4 py-4">
+              <p className="text-xs uppercase tracking-[0.18em] muted">Entry</p>
+              <p className="mt-2 text-lg font-bold">{entryName}</p>
+              <p className="mt-1 text-sm muted">{entryLocation}</p>
+            </div>
+            <div className="panel-soft px-4 py-4">
+              <p className="text-xs uppercase tracking-[0.18em] muted">Route</p>
+              <p className="mt-2 text-lg font-bold">{routeName || 'Legacy single-node'}</p>
+              <p className="mt-1 text-sm muted">
+                {exitName ? `${entryName} -> ${exitName}` : 'Пока используется только entry-узел'}
+              </p>
+            </div>
+            <div className="panel-soft px-4 py-4">
+              <p className="text-xs uppercase tracking-[0.18em] muted">Exit</p>
+              <p className="mt-2 text-lg font-bold">{exitName || 'Не задан'}</p>
+              <p className="mt-1 text-sm muted">{exitLocation || 'Выходной узел не сконфигурирован'}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {config ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
           <div className="metric-card">
             <p className="metric-label">Создан</p>
             <p className="metric-value text-2xl">{new Date(config.created_at).toLocaleDateString('ru-RU')}</p>

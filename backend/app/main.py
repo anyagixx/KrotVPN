@@ -19,7 +19,7 @@ from slowapi.util import get_remote_address
 from app.core.config import settings
 from app.core.database import init_db, get_db_context
 from app.core.init_admin import ensure_admin_user
-from app.core.init_vpn import ensure_default_vpn_server
+from app.core.init_vpn import ensure_default_vpn_server, ensure_default_vpn_topology
 
 # Import routers
 from app.users.router import router as auth_router
@@ -27,6 +27,8 @@ from app.users.router import users_router
 from app.users.router import admin_users_router as admin_users_router
 from app.vpn.router import router as vpn_router
 from app.vpn.router import admin_router as admin_vpn_router
+from app.vpn.router import admin_nodes_router as admin_vpn_nodes_router
+from app.vpn.router import admin_routes_router as admin_vpn_routes_router
 from app.routing.router import router as routing_router
 from app.billing.router import router as billing_router
 from app.billing.router import admin_router as admin_billing_router
@@ -76,6 +78,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info(f"[APP] VPN server ready: {vpn_server.name} ({vpn_server.endpoint})")
         else:
             logger.info("[APP] No default VPN server configured in .env")
+
+        vpn_route = await ensure_default_vpn_topology(session, legacy_server=vpn_server)
+        if vpn_route:
+            logger.info(f"[APP] VPN route ready: {vpn_route.name}")
+        else:
+            logger.info("[APP] VPN route bootstrap skipped or incomplete")
     
     # Production routing is managed by host-level systemd scripts.
     if settings.is_production:
@@ -169,6 +177,8 @@ app.include_router(admin_users_router)
 # VPN
 app.include_router(vpn_router)
 app.include_router(admin_vpn_router)
+app.include_router(admin_vpn_nodes_router)
+app.include_router(admin_vpn_routes_router)
 
 # Routing
 app.include_router(routing_router)

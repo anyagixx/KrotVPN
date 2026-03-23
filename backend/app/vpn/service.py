@@ -11,8 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import decrypt_data, encrypt_data
+from app.routing.manager import routing_manager
 from app.vpn.amneziawg import wg_manager
-from app.vpn.models import VPNClient, VPNConfig, VPNServer, VPNStats, ServerStatus
+from app.vpn.models import (
+    VPNClient,
+    VPNConfig,
+    VPNNode,
+    VPNRoute,
+    VPNServer,
+    VPNStats,
+)
 
 
 class VPNService:
@@ -22,9 +30,30 @@ class VPNService:
         self.session = session
         self.wg = wg_manager
 
-    async def get_server(self, server_id: int) -> VPNServer | None:
+    async def get_server(self, server_id: int | None) -> VPNServer | None:
         """Get VPN server by ID."""
+        if server_id is None:
+            return None
         return await self.session.get(VPNServer, server_id)
+
+    async def get_node(self, node_id: int | None) -> VPNNode | None:
+        """Get VPN node by ID."""
+        if node_id is None:
+            return None
+        return await self.session.get(VPNNode, node_id)
+
+    async def get_route(self, route_id: int | None) -> VPNRoute | None:
+        """Get VPN route by ID."""
+        if route_id is None:
+            return None
+        return await self.session.get(VPNRoute, route_id)
+
+    async def get_server_by_public_key(self, public_key: str) -> VPNServer | None:
+        """Get legacy VPN server by public key."""
+        result = await self.session.execute(
+            select(VPNServer).where(VPNServer.public_key == public_key)
+        )
+        return result.scalar_one_or_none()
 
     async def get_active_server(self) -> VPNServer | None:
         """Get an active server for new clients."""
@@ -39,6 +68,53 @@ class VPNService:
             .order_by(VPNServer.current_clients.asc())
         )
         return result.scalar_one_or_none()
+
+    async def get_active_entry_node(self) -> VPNNode | None:
+        """Get an active entry node for route-less fallback."""
+        result = await self.session.execute(
+            select(VPNNode)
+            .where(
+                VPNNode.is_active == True,
+                VPNNode.is_online == True,
+                VPNNode.is_entry_node == True,
+                VPNNode.current_clients < VPNNode.max_clients,
+            )
+            .order_by(VPNNode.current_clients.asc(), VPNNode.created_at.asc())
+        )
+        return result.scalar_one_or_none()
+
+    async def get_default_route(self) -> VPNRoute | None:
+        """Get the default active route for new clients."""
+        result = await self.session.execute(
+            select(VPNRoute)
+            .where(
+                VPNRoute.is_active == True,
+                VPNRoute.is_default == True,
+            )
+            .order_by(VPNRoute.priority.asc(), VPNRoute.created_at.asc())
+        )
+        return result.scalar_one_or_none()
+
+    async def get_active_route(self) -> VPNRoute | None:
+        """Get the next active route when there is no explicit default."""
+        route = await self.get_default_route()
+        if route is not None:
+            return route
+
+        result = await self.session.execute(
+            select(VPNRoute)
+            .where(VPNRoute.is_active == True)
+            .order_by(VPNRoute.priority.asc(), VPNRoute.created_at.asc())
+        )
+        return result.scalar_one_or_none()
+
+    async def get_server_for_route(self, route: VPNRoute | None) -> VPNServer | None:
+        """Resolve the legacy entry server used to provision a route."""
+        if route is None:
+            return None
+
+        entry_node = await self.get_node(route.entry_node_id)
+        return await self.get_legacy_server_for_node(entry_node, create=False)
 
     async def create_client(
         self,
@@ -56,34 +132,85 @@ class VPNService:
             Created VPNClient
         """
         existing_client = await self.get_user_client(user_id, active_only=False)
+        route: VPNRoute | None = None
+        entry_node: VPNNode | None = None
+        exit_node: VPNNode | None = None
 
         # Get server
         if server_id:
             server = await self.get_server(server_id)
+            if server is not None:
+                route, entry_node, exit_node = await self._resolve_topology_for_server(server)
         elif existing_client is not None:
-            server = await self._select_server_for_existing_client(existing_client)
+            route, entry_node, exit_node, server = await self._select_topology_for_existing_client(existing_client)
         else:
-            server = await self.get_active_server()
+            route, entry_node, exit_node, server = await self._select_topology_for_new_client()
 
-        if not server:
+        if entry_node is None and server is not None:
+            _, entry_node, exit_node = await self._resolve_topology_for_server(server)
+
+        if entry_node is not None:
+            server = await self.get_legacy_server_for_node(entry_node)
+
+        if not server or entry_node is None:
             raise ValueError("No available VPN servers")
 
         if existing_client is not None:
             if existing_client.is_active:
-                if server_id and existing_client.server_id != server.id:
+                current_entry_node = await self.get_node(existing_client.entry_node_id)
+                current_server = await self.get_server(existing_client.server_id)
+                current_public_key = (
+                    current_entry_node.public_key if current_entry_node is not None
+                    else current_server.public_key if current_server is not None
+                    else None
+                )
+                if server_id and current_public_key != entry_node.public_key:
                     raise ValueError("User already has an active VPN client on another server")
+                await self._sync_client_topology(
+                    existing_client,
+                    route=route,
+                    entry_node=entry_node,
+                    exit_node=exit_node,
+                )
+                await self.session.flush()
                 return existing_client
 
-            if existing_client.server_id == server.id:
+            current_entry_node = await self.get_node(existing_client.entry_node_id)
+            current_server = await self.get_server(existing_client.server_id)
+            current_public_key = (
+                current_entry_node.public_key if current_entry_node is not None
+                else current_server.public_key if current_server is not None
+                else None
+            )
+
+            if current_public_key == entry_node.public_key:
                 await self.activate_client(existing_client)
+                await self._sync_client_topology(
+                    existing_client,
+                    route=route,
+                    entry_node=entry_node,
+                    exit_node=exit_node,
+                )
                 await self.session.refresh(existing_client)
                 return existing_client
 
-            reprovisioned = await self._reprovision_client(existing_client, server)
+            reprovisioned = await self._reprovision_client(
+                existing_client,
+                server,
+                route=route,
+                entry_node=entry_node,
+                exit_node=exit_node,
+            )
             await self.session.refresh(reprovisioned)
             return reprovisioned
 
-        client = await self._provision_new_client(user_id=user_id, server=server)
+        client = await self._provision_new_client(
+            user_id=user_id,
+            server=server,
+            route=route,
+            entry_node=entry_node,
+            exit_node=exit_node,
+        )
         await self.session.refresh(client)
         return client
 
@@ -110,15 +237,21 @@ class VPNService:
         Returns:
             VPNConfig with configuration content
         """
+        route = await self.get_route(client.route_id)
+        entry_node = await self.get_node(client.entry_node_id)
+        exit_node = await self.get_node(client.exit_node_id)
         server = await self.get_server(client.server_id)
-        if not server:
-            raise ValueError("Server not found")
-        
+
+        if entry_node is None and server is not None:
+            _, entry_node, exit_node = await self._resolve_topology_for_server(server)
+        if entry_node is None:
+            raise ValueError("Entry node not found")
+
         # Decrypt private key
         private_key = decrypt_data(client.private_key_enc)
         
-        # Get server endpoint
-        endpoint = server.endpoint or await self.wg.get_server_endpoint()
+        # Get server endpoint from entry topology first.
+        endpoint = entry_node.endpoint or (server.endpoint if server else None) or await self.wg.get_server_endpoint()
         if not endpoint:
             raise ValueError("Cannot determine server endpoint")
         
@@ -126,14 +259,19 @@ class VPNService:
         config_content = self.wg.create_client_config(
             private_key=private_key,
             address=client.address,
-            server_public_key=server.public_key,
+            server_public_key=entry_node.public_key if entry_node.public_key else (server.public_key if server else ""),
             endpoint=endpoint,
         )
         
         return VPNConfig(
             config=config_content,
-            server_name=server.name,
-            server_location=server.location,
+            server_name=entry_node.name,
+            server_location=entry_node.location,
+            route_name=route.name if route else None,
+            entry_server_name=entry_node.name,
+            entry_server_location=entry_node.location,
+            exit_server_name=exit_node.name if exit_node else None,
+            exit_server_location=exit_node.location if exit_node else None,
             address=client.address,
             public_key=client.public_key,
             created_at=client.created_at,
@@ -144,10 +282,11 @@ class VPNService:
         client.is_active = False
         await self.wg.remove_peer(client.public_key)
         
-        # Update server client count
+        # Update legacy and route-aware client counts.
         server = await self.get_server(client.server_id)
         if server and server.current_clients > 0:
             server.current_clients -= 1
+        await self._apply_topology_client_delta(client, -1)
         
         await self.session.flush()
 
@@ -156,10 +295,11 @@ class VPNService:
         client.is_active = True
         await self.wg.add_peer(client.public_key, client.address)
         
-        # Update server client count
+        # Update legacy and route-aware client counts.
         server = await self.get_server(client.server_id)
-        if server:
+        if server and server.current_clients < server.max_clients:
             server.current_clients += 1
+        await self._apply_topology_client_delta(client, 1)
         
         await self.session.flush()
 
@@ -179,7 +319,10 @@ class VPNService:
         """Get VPN client statistics."""
         await self.update_client_stats(client)
         
+        entry_node = await self.get_node(client.entry_node_id)
         server = await self.get_server(client.server_id)
+        if entry_node is None and server is not None:
+            _, entry_node, _ = await self._resolve_topology_for_server(server)
         
         # Check if connected (handshake within last 3 minutes)
         is_connected = False
@@ -192,80 +335,401 @@ class VPNService:
             total_download_bytes=client.total_download_bytes,
             last_handshake_at=client.last_handshake_at,
             is_connected=is_connected,
-            server_name=server.name if server else "Unknown",
-            server_location=server.location if server else "Unknown",
+            server_name=entry_node.name if entry_node else (server.name if server else "Unknown"),
+            server_location=entry_node.location if entry_node else (server.location if server else "Unknown"),
         )
 
-    async def list_servers(self) -> list[VPNServer]:
-        """List all VPN servers."""
+    async def list_nodes(self) -> list[VPNNode]:
+        """List all VPN nodes."""
         result = await self.session.execute(
-            select(VPNServer).order_by(VPNServer.created_at)
+            select(VPNNode).order_by(VPNNode.created_at)
         )
         return list(result.scalars().all())
 
-    async def get_server_statuses(self) -> list[ServerStatus]:
-        """Get status of all servers."""
-        servers = await self.list_servers()
-        
-        statuses = []
-        for server in servers:
-            load = (server.current_clients / server.max_clients * 100) if server.max_clients > 0 else 0
-            statuses.append(ServerStatus(
-                id=server.id,
-                name=server.name,
-                location=server.location,
-                is_online=server.is_online,
-                current_clients=server.current_clients,
-                max_clients=server.max_clients,
-                load_percent=round(load, 1),
-            ))
-        
+    async def list_routes(self) -> list[VPNRoute]:
+        """List all VPN routes."""
+        result = await self.session.execute(
+            select(VPNRoute).order_by(VPNRoute.priority.asc(), VPNRoute.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_node_statuses(self) -> list[dict[str, Any]]:
+        """Get status of all VPN nodes."""
+        nodes = await self.list_nodes()
+        statuses: list[dict[str, Any]] = []
+
+        for node in nodes:
+            load = (node.current_clients / node.max_clients * 100) if node.max_clients > 0 else 0
+            statuses.append(
+                {
+                    "id": node.id,
+                    "name": node.name,
+                    "role": node.role,
+                    "country_code": node.country_code,
+                    "location": node.location,
+                    "endpoint": node.endpoint,
+                    "port": node.port,
+                    "public_key": node.public_key,
+                    "is_active": node.is_active,
+                    "is_online": node.is_online,
+                    "is_entry_node": node.is_entry_node,
+                    "is_exit_node": node.is_exit_node,
+                    "current_clients": node.current_clients,
+                    "max_clients": node.max_clients,
+                    "load_percent": round(load, 1),
+                }
+            )
+
         return statuses
 
-    async def create_server(
+    async def get_route_statuses(self) -> list[dict[str, Any]]:
+        """Get status of all VPN routes with resolved node names."""
+        routes = await self.list_routes()
+        statuses: list[dict[str, Any]] = []
+        tunnel_health = await routing_manager.check_tunnel_status()
+
+        for route in routes:
+            entry_node = await self.get_node(route.entry_node_id)
+            exit_node = await self.get_node(route.exit_node_id)
+            load = (route.current_clients / route.max_clients * 100) if route.max_clients > 0 else 0
+            tunnel_status = tunnel_health.get("status", "unknown") if exit_node is not None else "not_configured"
+            statuses.append(
+                {
+                    "id": route.id,
+                    "name": route.name,
+                    "entry_node_id": route.entry_node_id,
+                    "entry_node_name": entry_node.name if entry_node else "Unknown",
+                    "entry_node_location": entry_node.location if entry_node else "Unknown",
+                    "exit_node_id": route.exit_node_id,
+                    "exit_node_name": exit_node.name if exit_node else None,
+                    "exit_node_location": exit_node.location if exit_node else None,
+                    "is_active": route.is_active,
+                    "is_default": route.is_default,
+                    "tunnel_interface": tunnel_health.get("interface") if exit_node is not None else None,
+                    "tunnel_status": tunnel_status,
+                    "priority": route.priority,
+                    "current_clients": route.current_clients,
+                    "max_clients": route.max_clients,
+                    "load_percent": round(load, 1),
+                }
+            )
+
+        return statuses
+
+    async def create_node(
         self,
+        *,
         name: str,
+        role: str,
+        country_code: str,
         location: str,
         endpoint: str,
+        port: int = 51821,
         public_key: str,
         private_key: str | None = None,
-        port: int = 51821,
-        is_entry_node: bool = True,
-        is_exit_node: bool = False,
+        is_active: bool = True,
+        is_online: bool = True,
         max_clients: int = 100,
-    ) -> VPNServer:
-        """Create a new VPN server."""
+    ) -> VPNNode:
+        """Create a route-aware node and sync legacy entry-server record when needed."""
+        normalized_role, is_entry_node, is_exit_node = self._normalize_node_role(role)
+        existing = await self.session.execute(
+            select(VPNNode).where(VPNNode.public_key == public_key)
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise ValueError("Node with this public key already exists")
+
         private_key_enc = encrypt_data(private_key) if private_key else None
-        
-        server = VPNServer(
+        node = VPNNode(
             name=name,
+            role=normalized_role,
+            country_code=country_code.upper(),
             location=location,
             endpoint=endpoint,
             port=port,
             public_key=public_key,
             private_key_enc=private_key_enc,
+            is_active=is_active,
+            is_online=is_online,
             is_entry_node=is_entry_node,
             is_exit_node=is_exit_node,
             max_clients=max_clients,
         )
-        
-        self.session.add(server)
+        self.session.add(node)
         await self.session.flush()
-        await self.session.refresh(server)
-        
-        return server
 
-    async def update_server_status(
+        await self._sync_legacy_server_for_node(node)
+        await self.session.refresh(node)
+        return node
+
+    async def update_node(self, node: VPNNode, **changes: Any) -> VPNNode:
+        """Update a route-aware node and keep the legacy entry layer in sync."""
+        normalized_role = changes.get("role", node.role)
+        normalized_role, is_entry_node, is_exit_node = self._normalize_node_role(normalized_role)
+
+        public_key = changes.get("public_key", node.public_key)
+        if public_key != node.public_key:
+            existing = await self.session.execute(
+                select(VPNNode).where(VPNNode.public_key == public_key, VPNNode.id != node.id)
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise ValueError("Node with this public key already exists")
+
+        if "name" in changes:
+            node.name = changes["name"]
+        if "country_code" in changes:
+            node.country_code = changes["country_code"].upper()
+        if "location" in changes:
+            node.location = changes["location"]
+        if "endpoint" in changes:
+            node.endpoint = changes["endpoint"]
+        if "port" in changes:
+            node.port = changes["port"]
+        if "public_key" in changes:
+            node.public_key = changes["public_key"]
+        if "private_key" in changes:
+            node.private_key_enc = encrypt_data(changes["private_key"]) if changes["private_key"] else None
+        if "is_active" in changes:
+            node.is_active = changes["is_active"]
+        if "is_online" in changes:
+            node.is_online = changes["is_online"]
+        if "max_clients" in changes:
+            node.max_clients = changes["max_clients"]
+
+        node.role = normalized_role
+        node.is_entry_node = is_entry_node
+        node.is_exit_node = is_exit_node
+        node.updated_at = datetime.utcnow()
+
+        await self.session.flush()
+        await self._sync_legacy_server_for_node(node)
+        await self.session.refresh(node)
+        return node
+
+    async def delete_node(self, node: VPNNode) -> None:
+        """Delete a node if it is not referenced by routes, clients, or active legacy entry state."""
+        if await self._count_node_clients(node.id) > 0:
+            raise ValueError("Cannot delete node with assigned clients")
+
+        route_refs = await self.session.execute(
+            select(func.count(VPNRoute.id)).where(
+                (VPNRoute.entry_node_id == node.id) | (VPNRoute.exit_node_id == node.id)
+            )
+        )
+        if int(route_refs.scalar() or 0) > 0:
+            raise ValueError("Cannot delete node used by existing routes")
+
+        legacy_server = await self.get_server_by_public_key(node.public_key)
+        if legacy_server is not None:
+            if legacy_server.current_clients > 0:
+                raise ValueError("Cannot delete node while its legacy server has active clients")
+            await self.session.delete(legacy_server)
+
+        await self.session.delete(node)
+        await self.session.flush()
+
+    async def create_route(
         self,
-        server_id: int,
-        is_online: bool,
-    ) -> None:
-        """Update server online status."""
+        *,
+        name: str,
+        entry_node_id: int,
+        exit_node_id: int | None = None,
+        is_active: bool = True,
+        is_default: bool = False,
+        priority: int = 100,
+        max_clients: int | None = None,
+    ) -> VPNRoute:
+        """Create a route between entry and optional exit nodes."""
+        existing = await self.session.execute(
+            select(VPNRoute).where(VPNRoute.name == name)
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise ValueError("Route with this name already exists")
+
+        entry_node = await self.get_node(entry_node_id)
+        if entry_node is None:
+            raise ValueError("Entry node not found")
+        if not entry_node.is_entry_node:
+            raise ValueError("Selected entry node cannot accept client connections")
+
+        exit_node = await self.get_node(exit_node_id)
+        if exit_node_id is not None and exit_node is None:
+            raise ValueError("Exit node not found")
+        if exit_node is not None and not exit_node.is_exit_node:
+            raise ValueError("Selected exit node is not marked as an exit node")
+
+        route = VPNRoute(
+            name=name,
+            entry_node_id=entry_node_id,
+            exit_node_id=exit_node_id,
+            is_active=is_active,
+            is_default=is_default,
+            priority=priority,
+            max_clients=max_clients or self._route_capacity(entry_node, exit_node),
+            current_clients=0,
+        )
+        self.session.add(route)
+        await self.session.flush()
+
+        if is_default:
+            await self._set_default_route(route)
+
+        await self.session.refresh(route)
+        return route
+
+    async def update_route(self, route: VPNRoute, **changes: Any) -> VPNRoute:
+        """Update route topology and enforce single default route semantics."""
+        entry_node_id = changes.get("entry_node_id", route.entry_node_id)
+        exit_node_id = changes.get("exit_node_id", route.exit_node_id)
+
+        entry_node = await self.get_node(entry_node_id)
+        if entry_node is None:
+            raise ValueError("Entry node not found")
+        if not entry_node.is_entry_node:
+            raise ValueError("Selected entry node cannot accept client connections")
+
+        exit_node = await self.get_node(exit_node_id)
+        if exit_node_id is not None and exit_node is None:
+            raise ValueError("Exit node not found")
+        if exit_node is not None and not exit_node.is_exit_node:
+            raise ValueError("Selected exit node is not marked as an exit node")
+
+        if "name" in changes and changes["name"] != route.name:
+            existing = await self.session.execute(
+                select(VPNRoute).where(VPNRoute.name == changes["name"], VPNRoute.id != route.id)
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise ValueError("Route with this name already exists")
+            route.name = changes["name"]
+
+        route.entry_node_id = entry_node_id
+        route.exit_node_id = exit_node_id
+        if "is_active" in changes:
+            route.is_active = changes["is_active"]
+        if "priority" in changes:
+            route.priority = changes["priority"]
+        if "max_clients" in changes:
+            route.max_clients = changes["max_clients"]
+        elif "entry_node_id" in changes or "exit_node_id" in changes:
+            route.max_clients = self._route_capacity(entry_node, exit_node)
+
+        route.updated_at = datetime.utcnow()
+        await self.session.flush()
+
+        if changes.get("is_default") is True:
+            await self._set_default_route(route)
+        elif changes.get("is_default") is False:
+            route.is_default = False
+            await self.session.flush()
+
+        await self.session.refresh(route)
+        return route
+
+    async def delete_route(self, route: VPNRoute) -> None:
+        """Delete a route if no clients are assigned."""
+        result = await self.session.execute(
+            select(func.count(VPNClient.id)).where(VPNClient.route_id == route.id)
+        )
+        if int(result.scalar() or 0) > 0:
+            raise ValueError("Cannot delete route with assigned clients")
+
+        await self.session.delete(route)
+        await self.session.flush()
+
+    async def _count_node_clients(self, node_id: int | None) -> int:
+        """Count client records assigned to a node."""
+        if node_id is None:
+            return 0
+
+        result = await self.session.execute(
+            select(func.count(VPNClient.id)).where(
+                (VPNClient.entry_node_id == node_id) | (VPNClient.exit_node_id == node_id)
+            )
+        )
+        return int(result.scalar() or 0)
+
+    async def _set_default_route(self, route: VPNRoute) -> None:
+        """Mark one route as default and clear the flag from the rest."""
+        result = await self.session.execute(
+            select(VPNRoute).where(VPNRoute.id != route.id, VPNRoute.is_default == True)
+        )
+        for other in result.scalars().all():
+            other.is_default = False
+
+        route.is_default = True
+        await self.session.flush()
+
+    async def _sync_legacy_server_for_node(self, node: VPNNode) -> None:
+        """Mirror entry-capable nodes into the legacy vpn_servers table."""
+        legacy_server = await self.get_server_by_public_key(node.public_key)
+        if not node.is_entry_node:
+            if legacy_server is not None and legacy_server.current_clients == 0:
+                await self.session.delete(legacy_server)
+                await self.session.flush()
+            return
+
+        if legacy_server is None:
+            legacy_server = VPNServer(
+                name=node.name,
+                location=node.location,
+                endpoint=node.endpoint,
+                port=node.port,
+                public_key=node.public_key,
+                private_key_enc=node.private_key_enc,
+                is_active=node.is_active,
+                is_online=node.is_online,
+                is_entry_node=True,
+                is_exit_node=node.is_exit_node,
+                max_clients=node.max_clients,
+                current_clients=node.current_clients,
+            )
+            self.session.add(legacy_server)
+            await self.session.flush()
+            return
+
+        legacy_server.name = node.name
+        legacy_server.location = node.location
+        legacy_server.endpoint = node.endpoint
+        legacy_server.port = node.port
+        legacy_server.public_key = node.public_key
+        legacy_server.private_key_enc = node.private_key_enc
+        legacy_server.is_active = node.is_active
+        legacy_server.is_online = node.is_online
+        legacy_server.is_entry_node = True
+        legacy_server.is_exit_node = node.is_exit_node
+        legacy_server.max_clients = node.max_clients
+        legacy_server.updated_at = datetime.utcnow()
+        await self.session.flush()
+
+    async def list_legacy_servers(self) -> list[VPNServer]:
+        """Compatibility helper for direct legacy server access."""
+        result = await self.session.execute(
+            select(VPNServer).order_by(VPNServer.created_at)
+        )
+        return list(result.scalars().all())
+
+    async def set_legacy_server_online(self, server_id: int, is_online: bool) -> None:
+        """Compatibility helper to update mirrored server online status."""
         server = await self.get_server(server_id)
-        if server:
+        if server is not None:
             server.is_online = is_online
             server.last_ping_at = datetime.utcnow()
             await self.session.flush()
+
+    def _normalize_node_role(self, role: str) -> tuple[str, bool, bool]:
+        """Translate role string into normalized role and boolean flags."""
+        normalized = (role or "entry").strip().lower()
+        if normalized == "combined":
+            return normalized, True, True
+        if normalized == "exit":
+            return normalized, False, True
+        return "entry", True, False
+
+    def _route_capacity(self, entry_node: VPNNode, exit_node: VPNNode | None) -> int:
+        """Calculate effective route capacity from participating nodes."""
+        if exit_node is None:
+            return entry_node.max_clients
+        return min(entry_node.max_clients, exit_node.max_clients)
 
     async def _select_server_for_existing_client(self, client: VPNClient) -> VPNServer | None:
         """Reuse the existing server when it is still suitable, otherwise pick a new active one."""
@@ -284,25 +748,130 @@ class VPNService:
 
         return await self.get_active_server()
 
-    async def _get_used_ips(self, server_id: int, exclude_user_id: int | None = None) -> set[str]:
+    async def _select_topology_for_existing_client(
+        self,
+        client: VPNClient,
+    ) -> tuple[VPNRoute | None, VPNNode | None, VPNNode | None, VPNServer | None]:
+        """Prefer the client's assigned route, then fall back to route/default/legacy server logic."""
+        route = await self.get_route(client.route_id)
+        entry_node = await self.get_node(client.entry_node_id)
+        exit_node = await self.get_node(client.exit_node_id)
+
+        if route is not None:
+            if entry_node is None:
+                entry_node = await self.get_node(route.entry_node_id)
+            if exit_node is None:
+                exit_node = await self.get_node(route.exit_node_id)
+            server = await self.get_server_for_route(route)
+            if entry_node is not None:
+                return route, entry_node, exit_node, server
+
+        server = await self._select_server_for_existing_client(client)
+        if server is None:
+            return None, None, None, None
+
+        fallback_route, fallback_entry, fallback_exit = await self._resolve_topology_for_server(server)
+        return fallback_route, fallback_entry, fallback_exit, server
+
+    async def _select_topology_for_new_client(
+        self,
+    ) -> tuple[VPNRoute | None, VPNNode | None, VPNNode | None, VPNServer | None]:
+        """Pick route-aware topology first, then fall back to the legacy entry server pool."""
+        route = await self.get_active_route()
+        if route is not None:
+            entry_node = await self.get_node(route.entry_node_id)
+            exit_node = await self.get_node(route.exit_node_id)
+            server = await self.get_server_for_route(route)
+            if entry_node is not None:
+                return route, entry_node, exit_node, server
+
+        entry_node = await self.get_active_entry_node()
+        if entry_node is None:
+            return None, None, None, None
+
+        server = await self.get_legacy_server_for_node(entry_node)
+        route, entry_node, exit_node = await self._resolve_topology_for_server(server)
+        return route, entry_node, exit_node, server
+
+    async def _resolve_topology_for_server(
+        self,
+        server: VPNServer,
+    ) -> tuple[VPNRoute | None, VPNNode | None, VPNNode | None]:
+        """Derive route-aware metadata from a legacy server record."""
+        result = await self.session.execute(
+            select(VPNNode).where(VPNNode.public_key == server.public_key)
+        )
+        entry_node = result.scalar_one_or_none()
+        if entry_node is None:
+            return None, None, None
+
+        result = await self.session.execute(
+            select(VPNRoute)
+            .where(VPNRoute.entry_node_id == entry_node.id)
+            .order_by(VPNRoute.is_default.desc(), VPNRoute.priority.asc(), VPNRoute.created_at.asc())
+        )
+        route = result.scalars().first()
+        exit_node = await self.get_node(route.exit_node_id) if route is not None else None
+        return route, entry_node, exit_node
+
+    async def _sync_client_topology(
+        self,
+        client: VPNClient,
+        *,
+        route: VPNRoute | None,
+        entry_node: VPNNode | None,
+        exit_node: VPNNode | None,
+    ) -> None:
+        """Persist route-aware metadata on the client without breaking legacy fields."""
+        client.route_id = route.id if route is not None else None
+        client.entry_node_id = entry_node.id if entry_node is not None else None
+        client.exit_node_id = exit_node.id if exit_node is not None else None
+
+    async def _get_used_ips(
+        self,
+        *,
+        entry_node_id: int | None,
+        server_id: int,
+        exclude_user_id: int | None = None,
+    ) -> set[str]:
         """Collect already allocated client IPs for a server."""
-        query = select(VPNClient.address).where(VPNClient.server_id == server_id)
+        if entry_node_id is not None:
+            query = select(VPNClient.address).where(
+                (VPNClient.entry_node_id == entry_node_id)
+                | ((VPNClient.entry_node_id == None) & (VPNClient.server_id == server_id))
+            )
+        else:
+            query = select(VPNClient.address).where(VPNClient.server_id == server_id)
         if exclude_user_id is not None:
             query = query.where(VPNClient.user_id != exclude_user_id)
 
         result = await self.session.execute(query)
         return {row[0] for row in result.fetchall()}
 
-    async def _provision_new_client(self, user_id: int, server: VPNServer) -> VPNClient:
+    async def _provision_new_client(
+        self,
+        user_id: int,
+        server: VPNServer,
+        *,
+        route: VPNRoute | None = None,
+        entry_node: VPNNode | None = None,
+        exit_node: VPNNode | None = None,
+    ) -> VPNClient:
         """Provision a fresh VPN client record."""
+        if entry_node is None:
+            raise ValueError("Entry node is required for provisioning")
+        server = await self.get_legacy_server_for_node(entry_node)
         private_key, public_key = await self.wg.generate_keypair()
-        used_ips = await self._get_used_ips(server.id)
+        used_ips = await self._get_used_ips(entry_node_id=entry_node.id, server_id=server.id)
         address = self.wg.get_next_client_ip(used_ips)
         private_key_enc = encrypt_data(private_key)
 
         client = VPNClient(
             user_id=user_id,
             server_id=server.id,
+            route_id=route.id if route is not None else None,
+            entry_node_id=entry_node.id if entry_node is not None else None,
+            exit_node_id=exit_node.id if exit_node is not None else None,
             public_key=public_key,
             private_key_enc=private_key_enc,
             address=address,
@@ -312,16 +881,38 @@ class VPNService:
 
         await self.wg.add_peer(public_key, address)
         server.current_clients += 1
+        await self._apply_topology_client_delta(client, 1)
         await self.session.flush()
         return client
 
-    async def _reprovision_client(self, client: VPNClient, server: VPNServer) -> VPNClient:
+    async def _reprovision_client(
+        self,
+        client: VPNClient,
+        server: VPNServer,
+        *,
+        route: VPNRoute | None = None,
+        entry_node: VPNNode | None = None,
+        exit_node: VPNNode | None = None,
+    ) -> VPNClient:
         """Reassign an inactive client record to a new server with fresh keys."""
+        if entry_node is None:
+            raise ValueError("Entry node is required for reprovisioning")
+        previous_entry_node_id = client.entry_node_id
+        previous_exit_node_id = client.exit_node_id
+        previous_route_id = client.route_id
+        server = await self.get_legacy_server_for_node(entry_node)
         private_key, public_key = await self.wg.generate_keypair()
-        used_ips = await self._get_used_ips(server.id, exclude_user_id=client.user_id)
+        used_ips = await self._get_used_ips(
+            entry_node_id=entry_node.id,
+            server_id=server.id,
+            exclude_user_id=client.user_id,
+        )
         address = self.wg.get_next_client_ip(used_ips)
 
         client.server_id = server.id
+        client.route_id = route.id if route is not None else None
+        client.entry_node_id = entry_node.id if entry_node is not None else None
+        client.exit_node_id = exit_node.id if exit_node is not None else None
         client.public_key = public_key
         client.private_key_enc = encrypt_data(private_key)
         client.address = address
@@ -333,5 +924,53 @@ class VPNService:
 
         await self.wg.add_peer(public_key, address)
         server.current_clients += 1
+        await self._apply_topology_client_delta_by_ids(previous_route_id, previous_entry_node_id, previous_exit_node_id, -1)
+        await self._apply_topology_client_delta(client, 1)
         await self.session.flush()
         return client
+
+    async def _apply_topology_client_delta(self, client: VPNClient, delta: int) -> None:
+        """Adjust node and route counters for a client assignment."""
+        await self._apply_topology_client_delta_by_ids(
+            client.route_id,
+            client.entry_node_id,
+            client.exit_node_id,
+            delta,
+        )
+
+    async def _apply_topology_client_delta_by_ids(
+        self,
+        route_id: int | None,
+        entry_node_id: int | None,
+        exit_node_id: int | None,
+        delta: int,
+    ) -> None:
+        """Adjust topology counters with floor-at-zero semantics."""
+        route = await self.get_route(route_id)
+        if route is not None:
+            route.current_clients = max(0, route.current_clients + delta)
+
+        entry_node = await self.get_node(entry_node_id)
+        if entry_node is not None:
+            entry_node.current_clients = max(0, entry_node.current_clients + delta)
+
+        exit_node = await self.get_node(exit_node_id)
+        if exit_node is not None:
+            exit_node.current_clients = max(0, exit_node.current_clients + delta)
+
+    async def get_legacy_server_for_node(
+        self,
+        node: VPNNode | None,
+        *,
+        create: bool = True,
+    ) -> VPNServer | None:
+        """Resolve or materialize the legacy server mirror for an entry-capable node."""
+        if node is None:
+            return None
+
+        legacy_server = await self.get_server_by_public_key(node.public_key)
+        if legacy_server is not None or not create:
+            return legacy_server
+
+        await self._sync_legacy_server_for_node(node)
+        return await self.get_server_by_public_key(node.public_key)

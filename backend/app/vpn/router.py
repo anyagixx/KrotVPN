@@ -13,6 +13,14 @@ from fastapi.responses import StreamingResponse
 from app.core import CurrentAdmin, CurrentUser, DBSession
 from app.vpn.models import VPNClient
 from app.vpn.schemas import (
+    NodeCreate,
+    NodeListResponse,
+    NodeStatusResponse,
+    NodeUpdate,
+    RouteCreate,
+    RouteListResponse,
+    RouteStatusResponse,
+    RouteUpdate,
     ServerCreate,
     ServerListResponse,
     ServerStatusResponse,
@@ -23,7 +31,10 @@ from app.vpn.schemas import (
 from app.vpn.service import VPNService
 
 router = APIRouter(prefix="/api/vpn", tags=["vpn"])
+# Deprecated compatibility surface. New code should use /api/admin/nodes and /api/admin/routes.
 admin_router = APIRouter(prefix="/api/admin/servers", tags=["admin"])
+admin_nodes_router = APIRouter(prefix="/api/admin/nodes", tags=["admin"])
+admin_routes_router = APIRouter(prefix="/api/admin/routes", tags=["admin"])
 
 
 def format_bytes(bytes_count: int) -> str:
@@ -40,6 +51,19 @@ def format_bytes(bytes_count: int) -> str:
         i += 1
     
     return f"{bytes_count:.1f} {units[i]}"
+
+
+def legacy_server_status_from_node(node_status: dict) -> ServerStatusResponse:
+    """Project a route-aware entry node into the legacy server response shape."""
+    return ServerStatusResponse(
+        id=node_status["id"],
+        name=node_status["name"],
+        location=node_status["location"],
+        is_online=node_status["is_online"],
+        current_clients=node_status["current_clients"],
+        max_clients=node_status["max_clients"],
+        load_percent=node_status["load_percent"],
+    )
 
 
 async def get_or_provision_user_client(
@@ -94,6 +118,11 @@ async def get_vpn_config(
         config=config.config,
         server_name=config.server_name,
         server_location=config.server_location,
+        route_name=config.route_name,
+        entry_server_name=config.entry_server_name,
+        entry_server_location=config.entry_server_location,
+        exit_server_name=config.exit_server_name,
+        exit_server_location=config.exit_server_location,
         address=config.address,
         created_at=config.created_at,
     )
@@ -197,22 +226,51 @@ async def list_servers(
     current_user: CurrentUser,
     session: DBSession,
 ):
-    """List available VPN servers."""
+    """Deprecated compatibility endpoint. Prefer /api/vpn/nodes and /api/vpn/routes."""
     service = VPNService(session)
-    statuses = await service.get_server_statuses()
+    statuses = await service.get_node_statuses()
     
     return ServerListResponse(
         servers=[
-            ServerStatusResponse(
-                id=s.id,
-                name=s.name,
-                location=s.location,
-                is_online=s.is_online,
-                current_clients=s.current_clients,
-                max_clients=s.max_clients,
-                load_percent=s.load_percent,
-            )
-            for s in statuses
+            legacy_server_status_from_node(status_data)
+            for status_data in statuses
+            if status_data["is_entry_node"]
+        ]
+    )
+
+
+@router.get("/nodes", response_model=NodeListResponse)
+async def list_nodes(
+    current_user: CurrentUser,
+    session: DBSession,
+):
+    """List public VPN nodes for authenticated users."""
+    service = VPNService(session)
+    statuses = await service.get_node_statuses()
+
+    return NodeListResponse(
+        nodes=[
+            NodeStatusResponse(**status_data)
+            for status_data in statuses
+            if status_data["is_active"]
+        ]
+    )
+
+
+@router.get("/routes", response_model=RouteListResponse)
+async def list_routes(
+    current_user: CurrentUser,
+    session: DBSession,
+):
+    """List public VPN routes for authenticated users."""
+    service = VPNService(session)
+    statuses = await service.get_route_statuses()
+
+    return RouteListResponse(
+        routes=[
+            RouteStatusResponse(**status_data)
+            for status_data in statuses
+            if status_data["is_active"]
         ]
     )
 
@@ -224,22 +282,15 @@ async def admin_list_servers(
     admin: CurrentAdmin,
     session: DBSession,
 ):
-    """List all VPN servers (admin)."""
+    """Deprecated compatibility endpoint. Prefer /api/admin/nodes and /api/admin/routes."""
     service = VPNService(session)
-    statuses = await service.get_server_statuses()
+    statuses = await service.get_node_statuses()
     
     return ServerListResponse(
         servers=[
-            ServerStatusResponse(
-                id=s.id,
-                name=s.name,
-                location=s.location,
-                is_online=s.is_online,
-                current_clients=s.current_clients,
-                max_clients=s.max_clients,
-                load_percent=s.load_percent,
-            )
-            for s in statuses
+            legacy_server_status_from_node(status_data)
+            for status_data in statuses
+            if status_data["is_entry_node"]
         ]
     )
 
@@ -250,22 +301,31 @@ async def create_server(
     admin: CurrentAdmin,
     session: DBSession,
 ):
-    """Create a new VPN server."""
+    """Deprecated compatibility endpoint. Creates a route-aware node under the hood."""
     service = VPNService(session)
-    
-    server = await service.create_server(
-        name=data.name,
-        location=data.location,
-        endpoint=data.endpoint,
-        public_key=data.public_key,
-        private_key=data.private_key,
-        port=data.port,
-        is_entry_node=data.is_entry_node,
-        is_exit_node=data.is_exit_node,
-        max_clients=data.max_clients,
-    )
-    
-    return {"id": server.id, "status": "created"}
+
+    role = "combined" if data.is_entry_node and data.is_exit_node else "exit" if data.is_exit_node else "entry"
+    try:
+        node = await service.create_node(
+            name=data.name,
+            role=role,
+            country_code="ZZ",
+            location=data.location,
+            endpoint=data.endpoint,
+            port=data.port,
+            public_key=data.public_key,
+            private_key=data.private_key,
+            is_active=True,
+            is_online=True,
+            max_clients=data.max_clients,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return {"id": node.id, "status": "created", "compat": True}
 
 
 @admin_router.get("/{server_id}", response_model=ServerStatusResponse)
@@ -274,25 +334,24 @@ async def get_server(
     admin: CurrentAdmin,
     session: DBSession,
 ):
-    """Get server details."""
+    """Deprecated compatibility endpoint backed by the entry-node layer."""
     service = VPNService(session)
-    server = await service.get_server(server_id)
-    
-    if server is None:
+    node = await service.get_node(server_id)
+
+    if node is None or not node.is_entry_node:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Server not found",
         )
-    
-    load = (server.current_clients / server.max_clients * 100) if server.max_clients > 0 else 0
-    
+
+    load = (node.current_clients / node.max_clients * 100) if node.max_clients > 0 else 0
     return ServerStatusResponse(
-        id=server.id,
-        name=server.name,
-        location=server.location,
-        is_online=server.is_online,
-        current_clients=server.current_clients,
-        max_clients=server.max_clients,
+        id=node.id,
+        name=node.name,
+        location=node.location,
+        is_online=node.is_online,
+        current_clients=node.current_clients,
+        max_clients=node.max_clients,
         load_percent=round(load, 1),
     )
 
@@ -304,23 +363,35 @@ async def update_server(
     admin: CurrentAdmin,
     session: DBSession,
 ):
-    """Update server configuration."""
+    """Deprecated compatibility endpoint backed by node updates."""
     service = VPNService(session)
-    server = await service.get_server(server_id)
-    
-    if server is None:
+    node = await service.get_node(server_id)
+
+    if node is None or not node.is_entry_node:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Server not found",
         )
-    
+
     update_data = data.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(server, field, value)
-    
-    await session.flush()
-    
-    return {"status": "updated"}
+    node_payload = {
+        "name": update_data.get("name"),
+        "location": update_data.get("location"),
+        "endpoint": update_data.get("endpoint"),
+        "is_active": update_data.get("is_active"),
+        "max_clients": update_data.get("max_clients"),
+    }
+    node_payload = {key: value for key, value in node_payload.items() if value is not None}
+
+    try:
+        await service.update_node(node, **node_payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return {"status": "updated", "compat": True}
 
 
 @admin_router.delete("/{server_id}")
@@ -329,23 +400,268 @@ async def delete_server(
     admin: CurrentAdmin,
     session: DBSession,
 ):
-    """Delete a VPN server."""
+    """Deprecated compatibility endpoint backed by node deletion."""
     service = VPNService(session)
-    server = await service.get_server(server_id)
-    
-    if server is None:
+    node = await service.get_node(server_id)
+
+    if node is None or not node.is_entry_node:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Server not found",
         )
-    
-    if server.current_clients > 0:
+
+    try:
+        await service.delete_node(node)
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete server with active clients",
+            detail=str(exc),
+        ) from exc
+
+    return {"status": "deleted", "compat": True}
+
+
+@admin_nodes_router.get("", response_model=NodeListResponse)
+async def admin_list_nodes(
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """List all VPN nodes (admin)."""
+    service = VPNService(session)
+    statuses = await service.get_node_statuses()
+
+    return NodeListResponse(
+        nodes=[
+            NodeStatusResponse(**status_data)
+            for status_data in statuses
+        ]
+    )
+
+
+@admin_nodes_router.post("", status_code=status.HTTP_201_CREATED)
+async def create_node(
+    data: NodeCreate,
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """Create a route-aware VPN node."""
+    service = VPNService(session)
+
+    try:
+        node = await service.create_node(**data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return {"id": node.id, "status": "created"}
+
+
+@admin_nodes_router.get("/{node_id}", response_model=NodeStatusResponse)
+async def get_node(
+    node_id: int,
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """Get node details."""
+    service = VPNService(session)
+    node = await service.get_node(node_id)
+
+    if node is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Node not found",
         )
-    
-    await session.delete(server)
-    await session.flush()
-    
+
+    load = (node.current_clients / node.max_clients * 100) if node.max_clients > 0 else 0
+    return NodeStatusResponse(
+        id=node.id,
+        name=node.name,
+        role=node.role,
+        country_code=node.country_code,
+        location=node.location,
+        endpoint=node.endpoint,
+        port=node.port,
+        public_key=node.public_key,
+        is_active=node.is_active,
+        is_online=node.is_online,
+        is_entry_node=node.is_entry_node,
+        is_exit_node=node.is_exit_node,
+        current_clients=node.current_clients,
+        max_clients=node.max_clients,
+        load_percent=round(load, 1),
+    )
+
+
+@admin_nodes_router.put("/{node_id}")
+async def update_node(
+    node_id: int,
+    data: NodeUpdate,
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """Update a route-aware VPN node."""
+    service = VPNService(session)
+    node = await service.get_node(node_id)
+
+    if node is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Node not found",
+        )
+
+    try:
+        await service.update_node(node, **data.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return {"status": "updated"}
+
+
+@admin_nodes_router.delete("/{node_id}")
+async def delete_node(
+    node_id: int,
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """Delete a route-aware VPN node."""
+    service = VPNService(session)
+    node = await service.get_node(node_id)
+
+    if node is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Node not found",
+        )
+
+    try:
+        await service.delete_node(node)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return {"status": "deleted"}
+
+
+@admin_routes_router.get("", response_model=RouteListResponse)
+async def admin_list_routes(
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """List all VPN routes (admin)."""
+    service = VPNService(session)
+    statuses = await service.get_route_statuses()
+
+    return RouteListResponse(
+        routes=[
+            RouteStatusResponse(**status_data)
+            for status_data in statuses
+        ]
+    )
+
+
+@admin_routes_router.post("", status_code=status.HTTP_201_CREATED)
+async def create_route(
+    data: RouteCreate,
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """Create a VPN route."""
+    service = VPNService(session)
+
+    try:
+        route = await service.create_route(**data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return {"id": route.id, "status": "created"}
+
+
+@admin_routes_router.get("/{route_id}", response_model=RouteStatusResponse)
+async def get_route(
+    route_id: int,
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """Get route details."""
+    service = VPNService(session)
+    route = await service.get_route(route_id)
+
+    if route is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Route not found",
+        )
+
+    statuses = await service.get_route_statuses()
+    status_data = next((item for item in statuses if item["id"] == route_id), None)
+    if status_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Route not found",
+        )
+    return RouteStatusResponse(**status_data)
+
+
+@admin_routes_router.put("/{route_id}")
+async def update_route(
+    route_id: int,
+    data: RouteUpdate,
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """Update a VPN route."""
+    service = VPNService(session)
+    route = await service.get_route(route_id)
+
+    if route is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Route not found",
+        )
+
+    try:
+        await service.update_route(route, **data.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return {"status": "updated"}
+
+
+@admin_routes_router.delete("/{route_id}")
+async def delete_route(
+    route_id: int,
+    admin: CurrentAdmin,
+    session: DBSession,
+):
+    """Delete a VPN route."""
+    service = VPNService(session)
+    route = await service.get_route(route_id)
+
+    if route is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Route not found",
+        )
+
+    try:
+        await service.delete_route(route)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
     return {"status": "deleted"}

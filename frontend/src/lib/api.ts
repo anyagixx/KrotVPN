@@ -80,6 +80,11 @@ export interface VPNConfig {
   config: string
   server_name: string
   server_location: string
+  route_name?: string | null
+  entry_server_name?: string | null
+  entry_server_location?: string | null
+  exit_server_name?: string | null
+  exit_server_location?: string | null
   address: string
   created_at: string
 }
@@ -93,6 +98,43 @@ export interface VPNStats {
   is_connected: boolean
   server_name: string
   server_location: string
+}
+
+export interface VPNNodeStatus {
+  id: number
+  name: string
+  role: string
+  country_code: string
+  location: string
+  endpoint: string
+  port: number
+  public_key: string
+  is_active: boolean
+  is_online: boolean
+  is_entry_node: boolean
+  is_exit_node: boolean
+  current_clients: number
+  max_clients: number
+  load_percent: number
+}
+
+export interface VPNRouteStatus {
+  id: number
+  name: string
+  entry_node_id: number
+  entry_node_name: string
+  entry_node_location: string
+  exit_node_id?: number | null
+  exit_node_name?: string | null
+  exit_node_location?: string | null
+  is_active: boolean
+  is_default: boolean
+  tunnel_interface?: string | null
+  tunnel_status: string
+  priority: number
+  current_clients: number
+  max_clients: number
+  load_percent: number
 }
 
 export interface UserStats {
@@ -180,9 +222,12 @@ export const vpnApi = {
   
   getStats: () =>
     api.get<VPNStats>('/vpn/stats'),
-  
-  getServers: () =>
-    api.get('/vpn/servers'),
+
+  getNodes: () =>
+    api.get<{ nodes: VPNNodeStatus[] }>('/vpn/nodes'),
+
+  getRoutes: () =>
+    api.get<{ routes: VPNRouteStatus[] }>('/vpn/routes'),
 }
 
 // Billing API

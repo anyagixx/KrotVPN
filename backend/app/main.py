@@ -77,10 +77,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         else:
             logger.info("[APP] No default VPN server configured in .env")
     
-    # Initialize routing manager
-    from app.routing import routing_manager
-    await routing_manager.initialize()
-    logger.info("[APP] Routing manager initialized")
+    # Production routing is managed by host-level systemd scripts.
+    if settings.is_production:
+        logger.info("[APP] Routing manager skipped in production (host-managed)")
+    else:
+        from app.routing import routing_manager
+        await routing_manager.initialize()
+        logger.info("[APP] Routing manager initialized")
     
     # Start task scheduler
     from app.tasks import task_scheduler

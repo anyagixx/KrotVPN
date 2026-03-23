@@ -488,7 +488,12 @@ fi
 # Update KrotVPN
 echo -e "${BLUE}[RU] Updating KrotVPN application...${NC}"
 cd /opt/KrotVPN
-git pull
+CURRENT_BRANCH=$(git symbolic-ref --short -q HEAD || true)
+if [ -n "$CURRENT_BRANCH" ]; then
+    git pull --ff-only origin "$CURRENT_BRANCH"
+else
+    echo -e "${YELLOW}[RU] Detached HEAD detected, skipping git pull${NC}"
+fi
 
 # Generate SSL
 echo -e "${BLUE}[RU] Generating SSL certificate...${NC}"
@@ -623,6 +628,8 @@ echo -e "${GREEN}✓ Systemd services created${NC}"
 # Docker
 echo -e "${BLUE}[RU] Building and starting Docker containers...${NC}"
 cd /opt/KrotVPN
+mkdir -p logs
+chown 1000:1000 logs
 docker compose up -d --build
 
 echo ""

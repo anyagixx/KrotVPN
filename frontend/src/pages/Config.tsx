@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from 'react-query'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowRightLeft, Check, Download, FileCode2, Monitor, QrCode, Smartphone } from 'lucide-react'
+import { AlertTriangle, ArrowRightLeft, Check, Copy, Download, FileCode2, Monitor, QrCode, Smartphone } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { vpnApi } from '../lib/api'

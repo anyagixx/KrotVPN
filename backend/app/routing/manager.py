@@ -161,6 +161,12 @@ echo "RU IPset updated: $(ipset list ru_ips | grep 'Number of entries' | cut -d:
         """
         config_path = Path(f"/etc/amnezia/amneziawg/{tunnel_interface}.conf")
 
+        def _config_is_host_managed() -> bool:
+            try:
+                return config_path.exists()
+            except PermissionError:
+                return True
+
         try:
             # Check if interface exists and is up
             proc = await asyncio.create_subprocess_exec(
@@ -171,7 +177,7 @@ echo "RU IPset updated: $(ipset list ru_ips | grep 'Number of entries' | cut -d:
             stdout, _ = await proc.communicate()
             
             if proc.returncode != 0:
-                if config_path.exists():
+                if _config_is_host_managed():
                     return {"interface": tunnel_interface, "status": "host_managed"}
                 return {"interface": tunnel_interface, "status": "down"}
             
@@ -192,12 +198,12 @@ echo "RU IPset updated: $(ipset list ru_ips | grep 'Number of entries' | cut -d:
                 return {"interface": tunnel_interface, "status": "no_connectivity"}
                 
         except FileNotFoundError:
-            if config_path.exists():
+            if _config_is_host_managed():
                 return {"interface": tunnel_interface, "status": "host_managed"}
             return {"interface": tunnel_interface, "status": "down"}
         except Exception as e:
             logger.error(f"[ROUTING] Error checking tunnel status: {e}")
-            if config_path.exists():
+            if _config_is_host_managed():
                 return {"interface": tunnel_interface, "status": "host_managed"}
             return {"interface": tunnel_interface, "status": "error"}
     

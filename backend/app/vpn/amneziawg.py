@@ -210,6 +210,8 @@ AllowedIPs = {address}/32
             if self.server_config.exists():
                 with open(self.server_config, "a") as f:
                     f.write(peer_config)
+            else:
+                raise FileNotFoundError(f"Server config not found: {self.server_config}")
             
             # Apply peer to running interface
             try:
@@ -223,13 +225,14 @@ AllowedIPs = {address}/32
                 await asyncio.wait_for(proc.wait(), timeout=5)
                 
                 if proc.returncode != 0:
-                    # Try restarting the interface
-                    logger.warning("[VPN] Failed to add peer dynamically, restarting interface")
-                    await self.restart_service()
+                    stderr = await proc.stderr.read() if proc.stderr else b""
+                    logger.warning(
+                        "[VPN] Failed to add peer dynamically, relying on host-managed sync: "
+                        f"{stderr.decode().strip() or proc.returncode}"
+                    )
                     
             except asyncio.TimeoutError:
-                logger.warning("[VPN] Timeout adding peer, restarting interface")
-                await self.restart_service()
+                logger.warning("[VPN] Timeout adding peer dynamically, relying on host-managed sync")
             
             logger.info(f"[VPN] Added peer: {public_key[:20]}... -> {address}")
             return True
@@ -265,6 +268,13 @@ AllowedIPs = {address}/32
                 pattern = rf'\n\[Peer\]\nPublicKey\s*=\s*{re.escape(public_key)}\nAllowedIPs\s*=\s*[^\n]+\n'
                 new_content = re.sub(pattern, '', content)
                 self.server_config.write_text(new_content)
+
+            if proc.returncode != 0:
+                stderr = await proc.stderr.read() if proc.stderr else b""
+                logger.warning(
+                    "[VPN] Failed to remove peer dynamically, relying on host-managed sync: "
+                    f"{stderr.decode().strip() or proc.returncode}"
+                )
             
             logger.info(f"[VPN] Removed peer: {public_key[:20]}...")
             return True

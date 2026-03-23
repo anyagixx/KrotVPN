@@ -403,6 +403,21 @@ echo "Split-tunneling configured!"
 ROUTING_SCRIPT
 chmod +x /usr/local/bin/setup_routing.sh
 
+cat > /usr/local/bin/krotvpn-sync-awg0.sh << 'SYNC_SCRIPT'
+#!/bin/bash
+set -e
+
+TMP_FILE=$(mktemp)
+cleanup() {
+    rm -f "$TMP_FILE"
+}
+trap cleanup EXIT
+
+awg-quick strip awg0 > "$TMP_FILE"
+awg syncconf awg0 "$TMP_FILE"
+SYNC_SCRIPT
+chmod +x /usr/local/bin/krotvpn-sync-awg0.sh
+
 /usr/local/bin/update_ru_ips.sh
 
 # Firewall
@@ -647,10 +662,32 @@ Type=oneshot
 ExecStart=/usr/local/bin/update_ru_ips.sh
 SERVICE
 
+cat > /etc/systemd/system/krotvpn-sync-awg0.service << 'SERVICE'
+[Unit]
+Description=Sync awg0 peers for KrotVPN
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/krotvpn-sync-awg0.sh
+SERVICE
+
+cat > /etc/systemd/system/krotvpn-sync-awg0.path << 'PATHUNIT'
+[Unit]
+Description=Watch awg0 config changes for KrotVPN
+
+[Path]
+PathModified=/etc/amnezia/amneziawg/awg0.conf
+
+[Install]
+WantedBy=multi-user.target
+PATHUNIT
+
 systemctl daemon-reload
-systemctl enable krotvpn-routing krotvpn-ru-ips.timer
+systemctl enable krotvpn-routing krotvpn-ru-ips.timer krotvpn-sync-awg0.path
 systemctl start krotvpn-routing
 systemctl start krotvpn-ru-ips.timer
+systemctl start krotvpn-sync-awg0.path
 echo -e "${GREEN}✓ Systemd services created${NC}"
 
 # Docker

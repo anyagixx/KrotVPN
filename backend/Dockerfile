@@ -30,9 +30,6 @@ COPY app/ ./app/
 RUN mkdir -p /app/logs /app/data && \
     chown -R krotvpn:krotvpn /app
 
-# Switch to non-root user
-USER krotvpn
-
 # Environment
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app

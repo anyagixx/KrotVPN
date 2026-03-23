@@ -270,7 +270,7 @@ async def list_routes(
         routes=[
             RouteStatusResponse(**status_data)
             for status_data in statuses
-            if status_data["is_active"]
+            if status_data["is_active"] and status_data["exit_node_id"] is not None
         ]
     )
 

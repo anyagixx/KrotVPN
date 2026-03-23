@@ -620,9 +620,21 @@ Persistent=true
 WantedBy=timers.target
 TIMER
 
+cat > /etc/systemd/system/krotvpn-ru-ips.service << 'SERVICE'
+[Unit]
+Description=Update RU IPset for KrotVPN
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/update_ru_ips.sh
+SERVICE
+
 systemctl daemon-reload
 systemctl enable krotvpn-routing krotvpn-ru-ips.timer
 systemctl start krotvpn-routing
+systemctl start krotvpn-ru-ips.timer
 echo -e "${GREEN}✓ Systemd services created${NC}"
 
 # Docker

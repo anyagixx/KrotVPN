@@ -430,7 +430,7 @@ DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 cat > .env << EOF
 # === APPLICATION ===
 APP_NAME=KrotVPN
-APP_VERSION=2.4.19
+APP_VERSION=2.4.20
 DEBUG=false
 ENVIRONMENT=production
 HOST=0.0.0.0

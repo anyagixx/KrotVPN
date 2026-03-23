@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.20] - 2026-03-23
+
+### Fixed
+- Fixed VPN keypair generation during user provisioning by using proper async subprocess handling for `awg`
+- Switched backend peer management to the server interface `awg0` instead of the tunnel interface
+- Added backend runtime access to the AmneziaWG binary so registration-to-config smoke flow succeeds in production
+
 ## [2.4.19] - 2026-03-23
 
 ### Fixed

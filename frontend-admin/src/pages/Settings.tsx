@@ -193,7 +193,7 @@ export default function Settings() {
         <div>
           <h1 className="page-title">Routing policy</h1>
           <p className="page-subtitle">
-            Управление domain/CIDR policy, DNS bindings и explainable routing decisions без изменения user-facing flow.
+            Preferred control surface для domain/CIDR policy, DNS bindings и explainable routing decisions.
           </p>
         </div>
         <button className="btn-secondary" onClick={() => refreshPolicyQueries()}>
@@ -226,10 +226,11 @@ export default function Settings() {
             <ShieldAlert className="h-6 w-6" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold">Что уже реально работает</h3>
+            <h3 className="text-lg font-semibold">Preferred operator surface</h3>
             <p className="mt-2 text-sm muted">
               Backend теперь поддерживает CRUD для routing policy rules, explain endpoint и DNS binding inspection.
-              Этот экран выводит текущее состояние миграции и даёт оператору безопасную точку управления.
+              Этот экран теперь является основной точкой управления routing policy, а legacy custom routes
+              сохраняются только как compatibility fallback в runtime.
             </p>
           </div>
         </div>

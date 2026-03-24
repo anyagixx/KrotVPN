@@ -50,7 +50,7 @@
     </M-005>
     <M-006 NAME="admin-api" TYPE="ENTRY_POINT" verification-ref="V-M-006">
       <path>backend/app/admin</path>
-      <owns>dashboard stats, analytics and privileged system endpoints</owns>
+      <owns>dashboard stats, analytics, migration-safe routing summary and privileged system endpoints</owns>
     </M-006>
     <M-007 NAME="routing" TYPE="INTEGRATION" verification-ref="V-M-007">
       <path>backend/app/routing</path>
@@ -133,6 +133,8 @@
     <link from="M-006" to="M-003">Admin endpoints read VPN topology and client state.</link>
     <link from="M-006" to="M-004">Admin endpoints read billing state.</link>
     <link from="M-006" to="M-005">Admin endpoints read referral state.</link>
+    <link from="M-006" to="M-014">Admin analytics now count active domain and CIDR policy rules directly.</link>
+    <link from="M-006" to="M-015">Admin analytics expose active DNS binding counts for policy visibility.</link>
     <link from="M-007" to="M-001">Routing uses core settings and DB/session surfaces.</link>
     <link from="M-007" to="M-013">Routing manager now delegates effective route decisions to the policy resolver.</link>
     <link from="M-007" to="M-014">Routing manager translates legacy custom routes into domain and CIDR policy rules.</link>

@@ -71,7 +71,7 @@
     </V-M-004>
     <V-M-006 module="admin-api">
       <checks>Admin routing inspection and analytics endpoints enforce admin auth and reflect current policy state.</checks>
-      <tests>targeted admin API tests to be added during execution</tests>
+      <tests>backend/tests/test_route_decision_api.py backend/tests/test_admin_stats.py</tests>
       <anchors>ADMIN_ROUTE_POLICY_READ ADMIN_ROUTE_POLICY_MUTATION</anchors>
     </V-M-006>
     <V-M-007 module="routing">

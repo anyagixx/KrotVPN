@@ -190,7 +190,7 @@
       <step-2>Add M-015 DNS observer and bounded cache with TTL-driven expiry and refresh.</step-2>
       <step-3>Introduce decision logging anchors for every policy branch.</step-3>
     </Phase-2>
-    <Phase-3 status="planned">
+    <Phase-3 status="done">
       <name>Admin control plane and operator visibility</name>
       <step-1>Extend M-016 with CRUD for domain rules and read-only decision inspection endpoints.</step-1>
       <step-2>Expose policy and resolution state in the admin frontend without changing the user-facing product flow yet.</step-2>

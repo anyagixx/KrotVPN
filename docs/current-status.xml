@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Current project status for AI handoff -->
+<current-status>
+  <meta>
+    <project-name>KrotVPN</project-name>
+    <updated>2026-03-24</updated>
+    <status>active-development</status>
+  </meta>
+
+  <project-stage>
+    <name>MVP implemented, now in hardening and operational cleanup</name>
+    <summary>
+      Продукт уже содержит работающие backend/frontend/admin/bot/deploy контуры,
+      но пока находится не в фазе greenfield implementation, а в фазе stabilization:
+      security, deploy, migration discipline, AI handoff and consistency.
+    </summary>
+  </project-stage>
+
+  <what-is-working>
+    <item>Backend domain structure and API surface exist.</item>
+    <item>User frontend builds successfully in current local environment.</item>
+    <item>Admin frontend code exists as separate app.</item>
+    <item>VPN service supports route-aware logic with legacy compatibility.</item>
+    <item>Admin route-policy controls and migration-safe routing analytics are implemented.</item>
+    <item>Billing, referrals and Telegram bot are implemented at code level.</item>
+  </what-is-working>
+
+  <what-is-fragile>
+    <item>Deployment scripts and secrets handling.</item>
+    <item>Host-level VPN and routing dependencies.</item>
+    <item>Legacy VPNServer compatibility during topology migration.</item>
+    <item>Host-level rollout evidence for domain-aware routing is still incomplete.</item>
+    <item>Verification reproducibility across environments.</item>
+  </what-is-fragile>
+
+  <immediate-priorities>
+    <priority rank="1">Make AI handoff docs accurate and mandatory for new agents.</priority>
+    <priority rank="2">Remove unsafe deploy defaults and tighten secrets handling.</priority>
+    <priority rank="3">Stabilize VPN topology model and related analytics.</priority>
+    <priority rank="4">Improve repeatable local verification for backend and admin frontend.</priority>
+  </immediate-priorities>
+
+  <known-risks>
+    <risk severity="critical">Weak/default admin credentials in deployment scripts.</risk>
+    <risk severity="critical">Remote credentials handled through sshpass/base64 temporary materialization.</risk>
+    <risk severity="high">Tokens stored in localStorage in frontends.</risk>
+    <risk severity="high">Runtime DB compatibility migrations instead of disciplined migration workflow.</risk>
+    <risk severity="high">Strong dependence on host filesystem and host tools for VPN behavior.</risk>
+  </known-risks>
+
+  <handoff-instructions>
+    <step>Read this file first.</step>
+    <step>Read docs/knowledge-graph.xml second.</step>
+    <step>Read docs/development-plan.xml and docs/verification-plan.xml third.</step>
+    <step>Only then inspect the code of the module you are changing.</step>
+    <step>After completing work, update the relevant docs if system behavior, priorities or verification changed.</step>
+  </handoff-instructions>
+</current-status>

@@ -107,6 +107,10 @@
     <M-016 NAME="route-decision-api" TYPE="ENTRY_POINT" verification-ref="V-M-016">
       <path>backend/app/routing/router.py backend/app/admin/router.py frontend-admin</path>
       <owns>policy CRUD, decision inspection and operator-facing route observability</owns>
+      <exports>
+        <fn-policy-rule-crud>Admin CRUD endpoints for domain and CIDR routing rules</fn-policy-rule-crud>
+        <fn-policy-decision-explain>Inspection endpoint for effective route decisions and active DNS bindings</fn-policy-decision-explain>
+      </exports>
     </M-016>
     <M-017 NAME="route-sync-runtime" TYPE="INTEGRATION" verification-ref="V-M-017">
       <path>backend/app/routing/manager.py</path>

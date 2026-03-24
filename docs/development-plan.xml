@@ -184,7 +184,7 @@
       <step-2>Create M-013 resolver with deterministic precedence: domain exact, domain wildcard, DNS-bound IP, explicit CIDR, RU baseline, default.</step-2>
       <step-3>Keep current RU-vs-non-RU behavior as fallback so rollout remains backward compatible.</step-3>
     </Phase-1>
-    <Phase-2 status="planned">
+    <Phase-2 status="done">
       <name>Runtime synchronization and DNS binding</name>
       <step-1>Extend M-017 runtime sync so policy changes become incremental host-level updates instead of full resets where possible.</step-1>
       <step-2>Add M-015 DNS observer and bounded cache with TTL-driven expiry and refresh.</step-2>

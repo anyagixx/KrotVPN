@@ -101,6 +101,7 @@
       <owns>DNS resolution binding, TTL-aware caching and policy refresh triggers</owns>
       <exports>
         <fn-refresh-domain-bindings>Refreshes domain-to-IP bindings under TTL constraints</fn-refresh-domain-bindings>
+        <fn-expire-stale-bindings>Expires stale DNS-derived bindings and emits traceable expiry events</fn-expire-stale-bindings>
       </exports>
     </M-015>
     <M-016 NAME="route-decision-api" TYPE="ENTRY_POINT" verification-ref="V-M-016">
@@ -112,6 +113,7 @@
       <owns>incremental sync of policy decisions into host-level route sets and refresh actions</owns>
       <exports>
         <fn-apply-runtime-route-sync>Applies routing-set changes safely on the host</fn-apply-runtime-route-sync>
+        <fn-build-route-sync-plan>Calculates add/remove diffs before touching host ipsets</fn-build-route-sync-plan>
       </exports>
     </M-017>
   </modules>

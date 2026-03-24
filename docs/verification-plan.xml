@@ -97,7 +97,10 @@
         and fallback remains deterministic when no rule matches.
       </checks>
       <tests>backend/tests/test_route_policy_resolver.py</tests>
-      <anchors>ROUTE_DECISION_DOMAIN_EXACT ROUTE_DECISION_DOMAIN_WILDCARD ROUTE_DECISION_CIDR ROUTE_DECISION_FALLBACK</anchors>
+      <anchors>
+        ROUTE_DECISION_DOMAIN_EXACT ROUTE_DECISION_DOMAIN_WILDCARD ROUTE_DECISION_DNS_BOUND_IP
+        ROUTE_DECISION_CIDR ROUTE_DECISION_RU_BASELINE ROUTE_DECISION_FALLBACK
+      </anchors>
     </V-M-013>
     <V-M-014 module="domain-rule-store">
       <checks>Rule persistence preserves priority, activation state, domain normalization and duplicate handling.</checks>

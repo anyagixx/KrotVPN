@@ -89,7 +89,8 @@
     </V-M-010>
     <V-M-012 module="deploy-surface">
       <checks>Deploy and nginx changes do not introduce weak defaults or unsafe routing assumptions.</checks>
-      <evidence>static review of secrets, ports, mounts and host tool expectations</evidence>
+      <commands>bash -n deploy/deploy-ru-server.sh &amp;&amp; bash -n deploy/deploy-on-server.sh &amp;&amp; bash -n deploy/deploy-all.sh &amp;&amp; bash -n install.sh</commands>
+      <evidence>static review of secrets, ports, mounts and host tool expectations; if host validation is unavailable, report exact missing commands</evidence>
     </V-M-012>
     <V-M-013 module="route-policy-resolver">
       <checks>

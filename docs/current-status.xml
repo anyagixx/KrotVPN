@@ -39,8 +39,9 @@
     </gate>
     <gate id="routing-phase-4-step-2" status="blocked">
       <summary>
-        Production rollout is still gated on host-level review: runtime and deploy surfaces remain ipset/iptables-based,
-        and deploy scripts still materialize or print live secrets during provisioning.
+        Static deploy hardening is in place, but production rollout is still gated on host-level validation:
+        runtime and deploy surfaces remain ipset/iptables-based, and the current environment lacks `ipset`, `awg`
+        and `awg-quick`, so host-bound verification cannot be completed here.
       </summary>
     </gate>
     <gate id="routing-phase-4-step-3" status="partial">

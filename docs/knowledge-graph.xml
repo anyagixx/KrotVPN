@@ -79,7 +79,7 @@
     </M-011>
     <M-012 NAME="deploy-surface" TYPE="ENTRY_POINT" verification-ref="V-M-012">
       <path>deploy install.sh nginx docker-compose.yml</path>
-      <owns>installation, deploy scripts, runtime composition, proxying, cert generation</owns>
+      <owns>installation, deploy scripts, runtime composition, proxying, cert generation, host-tool preflight and deploy-time secret handling</owns>
     </M-012>
     <M-013 NAME="route-policy-resolver" TYPE="CORE_LOGIC" verification-ref="V-M-013">
       <path>backend/app/routing/policy.py</path>

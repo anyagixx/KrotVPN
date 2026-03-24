@@ -3,11 +3,18 @@ Routing manager for split-tunneling and custom routes.
 
 LEGACY SOURCE: krot-prod-main/backend/routing.py
 Handles iptables, ipset, and routing rules.
+
+GRACE-lite module contract:
+- Owns host-level split-tunneling behavior and route health inspection.
+- This code assumes Linux host tools exist and may mutate live routing state.
+- In production, some routing concerns are explicitly host-managed outside the FastAPI process.
+- Changes here should be reviewed like infrastructure changes, not normal application logic.
 """
 # <!-- GRACE: module="M-007" contract="routing-manager" -->
 # <!-- GRACE: legacy-source="krot-prod-main/backend/routing.py" -->
 
 import asyncio
+import ipaddress
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +22,10 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
+
+from app.routing.domain_rules import RuleValidationError, normalize_domain_rule_input
+from app.routing.models import CidrRouteRule, DomainMatchType, DomainRouteRule, RouteTarget
+from app.routing.policy import DecisionReason, RouteDecision, RoutePolicyResolver
 
 
 class RoutingManager:
@@ -206,6 +217,165 @@ echo "RU IPset updated: $(ipset list ru_ips | grep 'Number of entries' | cut -d:
             if _config_is_host_managed():
                 return {"interface": tunnel_interface, "status": "host_managed"}
             return {"interface": tunnel_interface, "status": "error"}
+
+    async def is_ip_in_ru_ipset(self, ip: str) -> bool:
+        """Check whether an IP belongs to the current RU ipset baseline."""
+        try:
+            normalized_ip = str(ipaddress.ip_address(ip))
+        except ValueError:
+            return False
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ipset", "test", self.IPSET_RU, normalized_ip,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+            return proc.returncode == 0
+        except FileNotFoundError:
+            logger.warning("[ROUTING] ipset is not available; RU baseline check skipped")
+            return False
+        except Exception as e:
+            logger.warning(f"[ROUTING] RU baseline ipset lookup failed for {ip}: {e}")
+            return False
+
+    async def resolve_effective_target(
+        self,
+        address: str,
+        *,
+        domain_rules: list[DomainRouteRule] | None = None,
+        cidr_rules: list[CidrRouteRule] | None = None,
+        custom_routes: list[dict[str, Any]] | None = None,
+    ) -> RouteDecision:
+        """Resolve the effective route target while preserving the legacy RU baseline."""
+        stripped = address.strip()
+        if not stripped:
+            return RouteDecision(
+                route_target=RouteTarget.DE,
+                reason=DecisionReason.DEFAULT,
+                trace_marker="ROUTE_DECISION_FALLBACK",
+            )
+
+        resolved_ip: str | None = None
+        domain: str | None = None
+        if self._is_ip_or_cidr(stripped):
+            if "/" not in stripped:
+                resolved_ip = stripped
+        else:
+            domain = stripped
+            resolved_ip = await self._resolve_domain_to_ipv4(stripped)
+
+        legacy_domain_rules, legacy_cidr_rules = self._build_legacy_policy_rules(custom_routes or [])
+        resolver = RoutePolicyResolver(default_target=RouteTarget.DE)
+        decision = resolver.resolve(
+            domain=domain,
+            resolved_ip=resolved_ip,
+            domain_rules=[*(domain_rules or []), *legacy_domain_rules],
+            cidr_rules=[*(cidr_rules or []), *legacy_cidr_rules],
+        )
+        if decision.reason is not DecisionReason.DEFAULT:
+            return decision
+
+        if resolved_ip is not None and await self.is_ip_in_ru_ipset(resolved_ip):
+            return RouteDecision(
+                route_target=RouteTarget.RU,
+                reason=DecisionReason.RU_BASELINE,
+                trace_marker="ROUTE_DECISION_RU_BASELINE",
+                matched_domain=domain,
+                normalized_domain=decision.normalized_domain,
+                resolved_ip=resolved_ip,
+            )
+
+        return decision
+
+    async def _resolve_domain_to_ipv4(self, domain: str) -> str | None:
+        """Resolve a domain to one IPv4 address for policy compatibility checks."""
+        try:
+            results = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: socket.getaddrinfo(domain, None, socket.AF_INET),
+            )
+        except Exception:
+            return None
+
+        for result in results:
+            ip = result[4][0]
+            if ip:
+                return ip
+        return None
+
+    def _build_legacy_policy_rules(
+        self,
+        routes: list[dict[str, Any]],
+    ) -> tuple[list[DomainRouteRule], list[CidrRouteRule]]:
+        """Translate legacy custom routes into policy-rule equivalents."""
+        domain_rules: list[DomainRouteRule] = []
+        cidr_rules: list[CidrRouteRule] = []
+
+        for index, route in enumerate(routes, start=1):
+            address = str(route.get("address", "")).strip()
+            if not address:
+                continue
+
+            route_target = self._legacy_route_target(str(route.get("route_type", "vpn")))
+            priority = int(route.get("priority", 500))
+            if self._is_ip_or_cidr(address):
+                normalized_cidr = self._normalize_legacy_cidr(address)
+                if normalized_cidr is None:
+                    continue
+                cidr_rules.append(
+                    CidrRouteRule(
+                        id=-index,
+                        cidr=address,
+                        normalized_cidr=normalized_cidr,
+                        route_target=route_target,
+                        priority=priority,
+                    )
+                )
+                continue
+
+            try:
+                normalized = normalize_domain_rule_input(address)
+            except RuleValidationError:
+                continue
+
+            domain_rules.append(
+                DomainRouteRule(
+                    id=-index,
+                    domain=normalized.raw_domain,
+                    normalized_domain=normalized.normalized_domain,
+                    match_type=normalized.match_type,
+                    route_target=route_target,
+                    priority=priority,
+                )
+            )
+
+        return domain_rules, cidr_rules
+
+    def _legacy_route_target(self, route_type: str) -> RouteTarget:
+        """Map legacy direct/vpn routes to policy route targets."""
+        return RouteTarget.DIRECT if route_type == "direct" else RouteTarget.DE
+
+    def _is_ip_or_cidr(self, value: str) -> bool:
+        """Return True when a string is parseable as an IP or CIDR."""
+        try:
+            if "/" in value:
+                ipaddress.ip_network(value, strict=False)
+            else:
+                ipaddress.ip_address(value)
+            return True
+        except ValueError:
+            return False
+
+    def _normalize_legacy_cidr(self, value: str) -> str | None:
+        """Normalize a legacy IP or CIDR route for policy matching."""
+        try:
+            if "/" in value:
+                return str(ipaddress.ip_network(value, strict=False))
+            return f"{ipaddress.ip_address(value)}/32"
+        except ValueError:
+            return None
     
     async def setup_split_tunnel(
         self,

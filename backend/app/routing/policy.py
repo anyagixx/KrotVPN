@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
 
+from loguru import logger
+
 from app.routing.domain_rules import RuleValidationError, normalize_domain_rule_input
 from app.routing.models import CidrRouteRule, DomainMatchType, DomainRouteRule, RouteTarget
 
@@ -104,7 +106,7 @@ class RoutePolicyResolver:
 
         dns_binding = self._match_dns_bound_route(normalized_ip, dns_bound_routes or [])
         if dns_binding is not None:
-            return RouteDecision(
+            decision = RouteDecision(
                 route_target=dns_binding.route_target,
                 reason=DecisionReason.DNS_BOUND_IP,
                 trace_marker=_TRACE_MARKERS[DecisionReason.DNS_BOUND_IP],
@@ -113,10 +115,12 @@ class RoutePolicyResolver:
                 normalized_domain=normalized_domain,
                 resolved_ip=normalized_ip,
             )
+            self._log_decision(decision)
+            return decision
 
         cidr_rule = self._match_cidr_rule(normalized_ip, cidr_rules or [])
         if cidr_rule is not None:
-            return RouteDecision(
+            decision = RouteDecision(
                 route_target=cidr_rule.route_target,
                 reason=DecisionReason.CIDR_RULE,
                 trace_marker=_TRACE_MARKERS[DecisionReason.CIDR_RULE],
@@ -125,9 +129,11 @@ class RoutePolicyResolver:
                 normalized_domain=normalized_domain,
                 resolved_ip=normalized_ip,
             )
+            self._log_decision(decision)
+            return decision
 
         if normalized_ip is not None and self.is_ru_ip(normalized_ip):
-            return RouteDecision(
+            decision = RouteDecision(
                 route_target=RouteTarget.RU,
                 reason=DecisionReason.RU_BASELINE,
                 trace_marker=_TRACE_MARKERS[DecisionReason.RU_BASELINE],
@@ -135,8 +141,10 @@ class RoutePolicyResolver:
                 normalized_domain=normalized_domain,
                 resolved_ip=normalized_ip,
             )
+            self._log_decision(decision)
+            return decision
 
-        return RouteDecision(
+        decision = RouteDecision(
             route_target=self.default_target,
             reason=DecisionReason.DEFAULT,
             trace_marker=_TRACE_MARKERS[DecisionReason.DEFAULT],
@@ -144,6 +152,8 @@ class RoutePolicyResolver:
             normalized_domain=normalized_domain,
             resolved_ip=normalized_ip,
         )
+        self._log_decision(decision)
+        return decision
 
     def _normalize_domain(self, domain: str | None) -> str | None:
         """Normalize runtime domain input when present."""
@@ -212,7 +222,7 @@ class RoutePolicyResolver:
             if rule.match_type == DomainMatchType.EXACT
             else DecisionReason.DOMAIN_WILDCARD
         )
-        return RouteDecision(
+        decision = RouteDecision(
             route_target=rule.route_target,
             reason=reason,
             trace_marker=_TRACE_MARKERS[reason],
@@ -221,6 +231,8 @@ class RoutePolicyResolver:
             normalized_domain=normalized_domain,
             resolved_ip=normalized_ip,
         )
+        self._log_decision(decision)
+        return decision
 
     def _match_dns_bound_route(
         self,
@@ -255,3 +267,18 @@ class RoutePolicyResolver:
             if ip in network:
                 return rule
         return None
+
+    def _log_decision(self, decision: RouteDecision) -> None:
+        """Emit a stable resolver log line for verification and debugging."""
+        logger.info(
+            "[Routing][resolver][{trace_marker}] decision_reason={decision_reason} "
+            "route_target={route_target} rule_id={rule_id} domain={domain} "
+            "normalized_domain={normalized_domain} resolved_ip={resolved_ip}",
+            trace_marker=decision.trace_marker,
+            decision_reason=decision.reason.value,
+            route_target=decision.route_target.value,
+            rule_id=decision.rule_id,
+            domain=decision.matched_domain,
+            normalized_domain=decision.normalized_domain,
+            resolved_ip=decision.resolved_ip,
+        )

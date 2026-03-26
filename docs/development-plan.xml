@@ -3,9 +3,9 @@
 <development-plan>
   <meta>
     <project-name>KrotVPN</project-name>
-    <version>2.5.0</version>
-    <updated>2026-03-24</updated>
-    <current-phase>Flexible domain-aware routing planning approved</current-phase>
+    <version>2.6.0</version>
+    <updated>2026-03-26</updated>
+    <current-phase>Manual internal client provisioning parity implemented locally</current-phase>
   </meta>
 
   <status-summary>
@@ -16,6 +16,7 @@
     <in-progress>
       Synchronizing GRACE shared artifacts with the real codebase.
       Designing a policy-driven routing layer that can classify traffic by domain and IP.
+      Designing a backend-driven manual provisioning path so operator-created configs match web-generated configs.
     </in-progress>
     <blocked-or-weak>
       Existing split-tunneling logic is too rigid for domain-level routing.
@@ -47,6 +48,10 @@
       <name>Verification and Testability</name>
       <goal>Raise routing, VPN and admin verification to a level safe for autonomous execution.</goal>
     </WS-005>
+    <WS-006 priority="critical" status="planned">
+      <name>Manual Internal Client Provisioning</name>
+      <goal>Replace raw host-only client config generation with a backend-driven internal-access flow that produces the same working configs as the web path.</goal>
+    </WS-006>
   </active-workstreams>
 
   <module-catalog>
@@ -137,6 +142,16 @@
       <target-paths>backend/app/routing/manager.py</target-paths>
       <depends>M-007 M-013 M-014 M-015</depends>
     </M-017>
+    <M-018 name="manual-access-policy" type="CORE_LOGIC" priority="critical" verification-ref="V-M-018">
+      <purpose>Grant and reuse internal non-billable access for operator-managed users without bypassing the main subscription and provisioning model.</purpose>
+      <target-paths>backend/app/users/service.py backend/app/billing/service.py backend/app/billing/models.py</target-paths>
+      <depends>M-001 M-002 M-003 M-004</depends>
+    </M-018>
+    <M-019 name="manual-client-cli" type="ENTRY_POINT" priority="critical" verification-ref="V-M-019">
+      <purpose>Create or reuse an internal user, ensure complimentary access, provision a VPN client, and export a working config through backend CLI.</purpose>
+      <target-paths>backend/app/cli.py deploy/create-client.sh</target-paths>
+      <depends>M-001 M-002 M-003 M-004 M-012 M-018</depends>
+    </M-019>
   </module-catalog>
 
   <data-flows>
@@ -175,6 +190,27 @@
         Operators can inspect why a domain or IP was routed to RU, DE, DIRECT or DEFAULT.
       </summary>
     </DF-005>
+    <DF-006>
+      <name>Manual internal client provisioning</name>
+      <path>M-019 -> M-002 -> M-018 -> M-003</path>
+      <summary>
+        Operator-run client creation resolves or creates an internal user, grants non-billable access, provisions a VPN client and returns the same config shape as the web flow.
+      </summary>
+    </DF-006>
+    <DF-007>
+      <name>Config parity between web and CLI paths</name>
+      <path>M-002 -> M-004 -> M-003 and M-019 -> M-018 -> M-003</path>
+      <summary>
+        Web registration and operator CLI issuance must converge on the same VPNService-based topology selection and config rendering path.
+      </summary>
+    </DF-007>
+    <DF-008>
+      <name>Manual client idempotency and reprovision safety</name>
+      <path>M-019 -> M-018 -> M-003</path>
+      <summary>
+        Re-running manual client issuance for the same identity should reuse or explicitly reprovision state instead of creating silent duplicate active clients.
+      </summary>
+    </DF-008>
   </data-flows>
 
   <implementation-order>
@@ -202,12 +238,20 @@
       <step-2>Gate production rollout on host-level safety review for ipset or nftables updates.</step-2>
       <step-3>Only after evidence is stable, make domain-aware policy the preferred routing control surface.</step-3>
     </Phase-4>
+    <Phase-5 status="done">
+      <name>Manual internal access and CLI provisioning parity</name>
+      <step-1>Add an internal non-billable access model that remains visible in normal user, subscription and VPN state instead of bypassing billing and provisioning.</step-1>
+      <step-2>Add backend CLI orchestration that creates or resolves the internal user, ensures access, provisions the client and exports config through VPNService.</step-2>
+      <step-3>Convert deploy/create-client.sh into a thin wrapper over the backend CLI so manual configs no longer use raw host-only generation.</step-3>
+      <step-4>Verify parity between manually issued configs and web-issued configs, including idempotency and restart-safe peer persistence.</step-4>
+    </Phase-5>
   </implementation-order>
 
   <observability-notes>
     <item>Every route decision must include a stable reason code: domain_exact, domain_wildcard, dns_bound_ip, cidr_rule, ru_baseline, default.</item>
     <item>DNS binding refresh must emit stable logs for add, refresh, expire and conflict branches.</item>
     <item>Runtime sync must expose whether a rule was applied incrementally, skipped, or required a full refresh.</item>
+    <item>Manual client issuance must emit stable markers for request, identity resolution, complimentary access grant, provisioning outcome and config export.</item>
   </observability-notes>
 
   <mental-walkthroughs>
@@ -229,6 +273,18 @@
         Resolver falls back to explicit CIDR policy and finally the existing RU baseline, preserving current behavior until policy coverage grows.
       </summary>
     </scenario>
+    <scenario id="MW-004">
+      <name>Operator creates internal client for family use</name>
+      <summary>
+        Admin runs the manual client command, backend resolves or creates an internal identity, grants non-billable access, provisions a VPN client and returns a config that matches the normal user flow.
+      </summary>
+    </scenario>
+    <scenario id="MW-005">
+      <name>Repeated manual issue for the same client name</name>
+      <summary>
+        CLI resolves the same internal identity and reuses or explicitly reprovisions the existing client rather than creating hidden duplicate state with a different peer or IP.
+      </summary>
+    </scenario>
   </mental-walkthroughs>
 
   <risks>
@@ -236,5 +292,8 @@
     <item>CDN and shared-IP domains can cause false sharing unless rule priority and conflict handling are explicit.</item>
     <item>Host-level rule churn can degrade stability if runtime sync is not incremental and bounded.</item>
     <item>Admin analytics can drift from real routing behavior if legacy VPNServer assumptions remain unadjusted.</item>
+    <item>Manual client issuance will remain unreliable if deploy/create-client.sh keeps generating peers and configs outside backend topology and subscription state.</item>
+    <item>Internal non-billable access can pollute billing analytics unless complimentary access is explicitly marked and reported.</item>
+    <item>Unsafe reprovision rules could create duplicate active clients or mismatched peer state for the same internal identity.</item>
   </risks>
 </development-plan>

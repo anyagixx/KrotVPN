@@ -93,8 +93,9 @@ async def migrate_existing_schema(conn) -> None:
     await _migrate_legacy_vpn_clients_to_topology(conn)
     await _sync_vpn_topology_client_counts(conn)
     await _deduplicate_vpn_clients(conn)
-    await _ensure_unique_vpn_client_user_id(conn)
     await _backfill_primary_user_devices(conn)
+    await _relax_vpn_client_user_uniqueness(conn)
+    await _ensure_unique_vpn_client_device_id(conn)
 
 
 async def _deduplicate_vpn_clients(conn) -> None:
@@ -185,21 +186,50 @@ async def _sync_vpn_server_client_counts(conn) -> None:
         )
 
 
-async def _ensure_unique_vpn_client_user_id(conn) -> None:
-    """Create a unique index for vpn_clients.user_id on legacy databases."""
+async def _relax_vpn_client_user_uniqueness(conn) -> None:
+    """Remove legacy uniqueness on vpn_clients.user_id so one user can own multiple device-bound peers."""
+    has_vpn_clients = await conn.run_sync(_table_exists, "vpn_clients")
+    if not has_vpn_clients:
+        return
+
     has_unique_index = await conn.run_sync(_has_unique_vpn_client_user_id)
+    if not has_unique_index:
+        return
+
+    if conn.dialect.name == "sqlite":
+        await _rebuild_vpn_clients_table_for_device_binding(conn)
+        logger.info("[DB] Rebuilt vpn_clients for device-bound uniqueness on SQLite")
+        return
+
+    descriptors = await conn.run_sync(_get_vpn_client_user_uniqueness_descriptors)
+    for index_name in descriptors["indexes"]:
+        await conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+    for constraint_name in descriptors["constraints"]:
+        await conn.execute(
+            text(f'ALTER TABLE vpn_clients DROP CONSTRAINT IF EXISTS "{constraint_name}"')
+        )
+    logger.info("[DB] Relaxed vpn_clients.user_id uniqueness for multi-device support")
+
+
+async def _ensure_unique_vpn_client_device_id(conn) -> None:
+    """Ensure vpn_clients.device_id is the stable uniqueness boundary."""
+    has_vpn_clients = await conn.run_sync(_table_exists, "vpn_clients")
+    if not has_vpn_clients:
+        return
+
+    has_unique_index = await conn.run_sync(_has_unique_vpn_client_device_id)
     if has_unique_index:
         return
 
     await conn.execute(
         text(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS ix_vpn_clients_user_id_unique
-            ON vpn_clients (user_id)
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_vpn_clients_device_id_unique
+            ON vpn_clients (device_id)
             """
         )
     )
-    logger.info("[DB] Ensured unique index for vpn_clients.user_id")
+    logger.info("[DB] Ensured unique index for vpn_clients.device_id")
 
 
 async def _ensure_vpn_client_topology_columns(conn) -> None:
@@ -784,6 +814,139 @@ def _has_unique_vpn_client_user_id(sync_conn) -> bool:
             return True
 
     return False
+
+
+def _has_unique_vpn_client_device_id(sync_conn) -> bool:
+    """Check whether vpn_clients.device_id is already uniquely constrained."""
+    inspector = inspect(sync_conn)
+    if "vpn_clients" not in inspector.get_table_names():
+        return False
+
+    for index in inspector.get_indexes("vpn_clients"):
+        if index.get("unique") and index.get("column_names") == ["device_id"]:
+            return True
+
+    for constraint in inspector.get_unique_constraints("vpn_clients"):
+        if constraint.get("column_names") == ["device_id"]:
+            return True
+
+    return False
+
+
+def _get_vpn_client_user_uniqueness_descriptors(sync_conn) -> dict[str, list[str]]:
+    """Return unique indexes and constraints that enforce vpn_clients.user_id uniqueness."""
+    inspector = inspect(sync_conn)
+    indexes: list[str] = []
+    constraints: list[str] = []
+    if "vpn_clients" not in inspector.get_table_names():
+        return {"indexes": indexes, "constraints": constraints}
+
+    for index in inspector.get_indexes("vpn_clients"):
+        if index.get("unique") and index.get("column_names") == ["user_id"]:
+            name = index.get("name")
+            if name:
+                indexes.append(name)
+
+    for constraint in inspector.get_unique_constraints("vpn_clients"):
+        if constraint.get("column_names") == ["user_id"]:
+            name = constraint.get("name")
+            if name:
+                constraints.append(name)
+
+    return {"indexes": indexes, "constraints": constraints}
+
+
+async def _rebuild_vpn_clients_table_for_device_binding(conn) -> None:
+    """Rebuild vpn_clients on SQLite without user uniqueness and with device uniqueness."""
+    await conn.execute(text("DROP TABLE IF EXISTS vpn_clients__new"))
+    await conn.execute(
+        text(
+            """
+            CREATE TABLE vpn_clients__new (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                device_id INTEGER,
+                server_id INTEGER,
+                route_id INTEGER,
+                entry_node_id INTEGER,
+                exit_node_id INTEGER,
+                public_key VARCHAR(100) NOT NULL UNIQUE,
+                private_key_enc VARCHAR(500) NOT NULL,
+                address VARCHAR(20) NOT NULL UNIQUE,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                total_upload_bytes INTEGER NOT NULL DEFAULT 0,
+                total_download_bytes INTEGER NOT NULL DEFAULT 0,
+                last_handshake_at DATETIME,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users (id),
+                FOREIGN KEY(device_id) REFERENCES user_devices (id),
+                FOREIGN KEY(server_id) REFERENCES vpn_servers (id),
+                FOREIGN KEY(route_id) REFERENCES vpn_routes (id),
+                FOREIGN KEY(entry_node_id) REFERENCES vpn_nodes (id),
+                FOREIGN KEY(exit_node_id) REFERENCES vpn_nodes (id)
+            )
+            """
+        )
+    )
+    await conn.execute(
+        text(
+            """
+            INSERT INTO vpn_clients__new (
+                id,
+                user_id,
+                device_id,
+                server_id,
+                route_id,
+                entry_node_id,
+                exit_node_id,
+                public_key,
+                private_key_enc,
+                address,
+                is_active,
+                total_upload_bytes,
+                total_download_bytes,
+                last_handshake_at,
+                created_at,
+                updated_at
+            )
+            SELECT
+                id,
+                user_id,
+                device_id,
+                server_id,
+                route_id,
+                entry_node_id,
+                exit_node_id,
+                public_key,
+                private_key_enc,
+                address,
+                is_active,
+                total_upload_bytes,
+                total_download_bytes,
+                last_handshake_at,
+                created_at,
+                updated_at
+            FROM vpn_clients
+            """
+        )
+    )
+    await conn.execute(text("DROP TABLE vpn_clients"))
+    await conn.execute(text("ALTER TABLE vpn_clients__new RENAME TO vpn_clients"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vpn_clients_user_id ON vpn_clients (user_id)"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vpn_clients_device_id ON vpn_clients (device_id)"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vpn_clients_server_id ON vpn_clients (server_id)"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vpn_clients_route_id ON vpn_clients (route_id)"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vpn_clients_entry_node_id ON vpn_clients (entry_node_id)"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vpn_clients_exit_node_id ON vpn_clients (exit_node_id)"))
+    await conn.execute(
+        text(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_vpn_clients_device_id_unique
+            ON vpn_clients (device_id)
+            """
+        )
+    )
 
 
 def _table_exists(sync_conn, table_name: str) -> bool:

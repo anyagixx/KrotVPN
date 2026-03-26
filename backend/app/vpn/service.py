@@ -10,6 +10,7 @@ GRACE-lite module contract:
 CHANGE_SUMMARY
 - 2026-03-26: Added internal-client provisioning helper and stable provisioning/config-render trace markers for manual CLI parity.
 - 2026-03-27: Added device-scoped client lookup helpers so revoke or block policy can target peer state through the existing VPN service.
+- 2026-03-27: Relaxed user-level lookup and added optional device-bound provisioning during the multi-device migration window.
 """
 # <!-- GRACE: module="M-003" contract="vpn-service" -->
 
@@ -130,6 +131,7 @@ class VPNService:
     async def create_client(
         self,
         user_id: int,
+        device_id: int | None = None,
         server_id: int | None = None,
     ) -> VPNClient:
         """
@@ -137,14 +139,17 @@ class VPNService:
         
         Args:
             user_id: User ID
+            device_id: Optional logical device ID for device-bound provisioning
             server_id: Optional specific server ID
             
         Returns:
             Created VPNClient
         """
-        # Provisioning logic must preserve the single-client-per-user invariant even
-        # while the project is migrating from legacy server assignment to route-aware topology.
-        existing_client = await self.get_user_client(user_id, active_only=False)
+        existing_client = (
+            await self.get_device_client(device_id, active_only=False)
+            if device_id is not None
+            else await self.get_user_client(user_id, active_only=False)
+        )
         route: VPNRoute | None = None
         entry_node: VPNNode | None = None
         exit_node: VPNNode | None = None
@@ -219,6 +224,7 @@ class VPNService:
 
         client = await self._provision_new_client(
             user_id=user_id,
+            device_id=device_id,
             server=server,
             route=route,
             entry_node=entry_node,
@@ -232,13 +238,21 @@ class VPNService:
         return await self.session.get(VPNClient, client_id)
 
     async def get_user_client(self, user_id: int, active_only: bool = True) -> VPNClient | None:
-        """Get VPN client for user."""
+        """Get one VPN client for a user for backward-compatible callers."""
         query = select(VPNClient).where(VPNClient.user_id == user_id)
         if active_only:
             query = query.where(VPNClient.is_active == True)
 
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        result = await self.session.execute(query.order_by(VPNClient.created_at.asc(), VPNClient.id.asc()))
+        return result.scalars().first()
+
+    async def get_device_client(self, device_id: int, active_only: bool = True) -> VPNClient | None:
+        """Get the VPN client currently bound to one logical device."""
+        query = select(VPNClient).where(VPNClient.device_id == device_id)
+        if active_only:
+            query = query.where(VPNClient.is_active == True)
+        result = await self.session.execute(query.order_by(VPNClient.created_at.asc(), VPNClient.id.asc()))
+        return result.scalars().first()
 
     async def list_device_clients(
         self,
@@ -905,7 +919,7 @@ class VPNService:
         *,
         entry_node_id: int | None,
         server_id: int,
-        exclude_user_id: int | None = None,
+        exclude_client_id: int | None = None,
     ) -> set[str]:
         """Collect already allocated client IPs for a server."""
         if entry_node_id is not None:
@@ -915,8 +929,8 @@ class VPNService:
             )
         else:
             query = select(VPNClient.address).where(VPNClient.server_id == server_id)
-        if exclude_user_id is not None:
-            query = query.where(VPNClient.user_id != exclude_user_id)
+        if exclude_client_id is not None:
+            query = query.where(VPNClient.id != exclude_client_id)
 
         result = await self.session.execute(query)
         return {row[0] for row in result.fetchall()}
@@ -924,6 +938,7 @@ class VPNService:
     async def _provision_new_client(
         self,
         user_id: int,
+        device_id: int | None,
         server: VPNServer,
         *,
         route: VPNRoute | None = None,
@@ -941,6 +956,7 @@ class VPNService:
 
         client = VPNClient(
             user_id=user_id,
+            device_id=device_id,
             server_id=server.id,
             route_id=route.id if route is not None else None,
             entry_node_id=entry_node.id if entry_node is not None else None,
@@ -983,7 +999,7 @@ class VPNService:
         used_ips = await self._get_used_ips(
             entry_node_id=entry_node.id,
             server_id=server.id,
-            exclude_user_id=client.user_id,
+            exclude_client_id=int(client.id) if client.id is not None else None,
         )
         address = self.wg.get_next_client_ip(used_ips)
 

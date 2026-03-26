@@ -5,7 +5,7 @@
     <project-name>KrotVPN</project-name>
     <version>2.6.1</version>
     <updated>2026-03-27</updated>
-    <current-phase>Manual internal client provisioning parity live-validated on fresh RU and DE infrastructure and released in v2.4.24</current-phase>
+    <current-phase>Manual internal client provisioning parity live-validated on fresh RU and DE infrastructure and released in v2.4.25 with refreshed GRACE integrity metadata</current-phase>
   </meta>
 
   <status-summary>

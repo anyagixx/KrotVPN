@@ -23,7 +23,7 @@
     <item>VPN service supports route-aware logic with legacy compatibility.</item>
     <item>Admin route-policy controls and migration-safe routing analytics are implemented.</item>
     <item>Billing, referrals and Telegram bot are implemented at code level.</item>
-    <item>Release v2.4.24 is published and includes backend-driven manual provisioning plus live awg0 peer activation for both manual and web-issued clients.</item>
+    <item>Release v2.4.25 is published and includes backend-driven manual provisioning, live awg0 peer activation for both manual and web-issued clients, and refreshed GRACE integrity metadata after reviewer reconciliation.</item>
     <item>RU and DE AWG interfaces are now managed through systemd and survive service restarts cleanly.</item>
     <item>DE host successfully rebooted into kernel 6.8.0-106-generic and AWG recovered automatically after boot.</item>
     <item>Fresh RU and DE servers were deployed and validated on March 26, 2026 with live AWG tunnel handshake and healthy backend/frontend/admin HTTPS surfaces on RU.</item>

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# KrotVPN Server Deployment Script v2.4.24
+# KrotVPN Server Deployment Script v2.4.25
 # Run this script ON the RU server
 # GRACE-lite operational contract:
 # - This script is executed on the RU host and consumes temporary config from /tmp/krotvpn_deploy.conf.
@@ -106,7 +106,7 @@ echo -e "${GREEN}[OK] RU IPv4: ${RU_IP}${NC}"
 # Print banner
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║           KrotVPN Automated Deployment v2.4.24              ║${NC}"
+echo -e "${CYAN}║           KrotVPN Automated Deployment v2.4.25              ║${NC}"
 echo -e "${CYAN}╠══════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${CYAN}║  RU Server (Entry): ${RU_IP}                            ║${NC}"
 echo -e "${CYAN}║  DE Server (Exit):  ${DE_IP}                            ║${NC}"
@@ -594,7 +594,7 @@ DB_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(16))")
 cat > .env << EOF
 # === APPLICATION ===
 APP_NAME=KrotVPN
-APP_VERSION=2.4.24
+APP_VERSION=2.4.25
 DEBUG=false
 ENVIRONMENT=production
 HOST=0.0.0.0

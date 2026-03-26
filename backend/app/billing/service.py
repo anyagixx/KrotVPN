@@ -10,6 +10,7 @@ GRACE-lite module contract:
 
 CHANGE_SUMMARY
 - 2026-03-26: Added complimentary internal-access helpers so manual non-billable clients can stay inside the subscription model.
+- 2026-03-27: Added effective device-limit helpers so device-bound provisioning can enforce per-plan limits before peer creation.
 """
 # <!-- GRACE: module="M-004" contract="billing-service" -->
 
@@ -66,6 +67,7 @@ class BillingService:
             price=data["price"],
             currency=data.get("currency", "RUB"),
             duration_days=data["duration_days"],
+            device_limit=data.get("device_limit", 1),
             features=json.dumps(data.get("features", [])),
             is_popular=data.get("is_popular", False),
             sort_order=data.get("sort_order", 0),
@@ -94,6 +96,23 @@ class BillingService:
             .order_by(Subscription.expires_at.desc())
         )
         return result.scalar_one_or_none()
+
+    async def get_effective_device_limit(self, user_id: int) -> int:
+        """Resolve the device limit for one user from the active subscription context."""
+        subscription = await self.get_user_subscription(user_id)
+        if subscription is None:
+            return 0
+
+        if subscription.is_complimentary:
+            return 9999
+
+        if subscription.plan_id is None:
+            return 1
+
+        plan = await self.get_plan(subscription.plan_id)
+        if plan is None:
+            return 1
+        return max(1, int(plan.device_limit))
     
     async def get_user_subscription_history(
         self, user_id: int, limit: int = 10

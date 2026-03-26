@@ -9,6 +9,7 @@ GRACE-lite module contract:
 
 CHANGE_SUMMARY
 - 2026-03-26: Added internal-client provisioning helper and stable provisioning/config-render trace markers for manual CLI parity.
+- 2026-03-27: Added device-scoped client lookup helpers so revoke or block policy can target peer state through the existing VPN service.
 """
 # <!-- GRACE: module="M-003" contract="vpn-service" -->
 
@@ -238,6 +239,26 @@ class VPNService:
 
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
+
+    async def list_device_clients(
+        self,
+        device_id: int,
+        *,
+        active_only: bool = False,
+    ) -> list[VPNClient]:
+        """List VPN clients linked to one device."""
+        query = select(VPNClient).where(VPNClient.device_id == device_id)
+        if active_only:
+            query = query.where(VPNClient.is_active == True)
+        result = await self.session.execute(query.order_by(VPNClient.created_at.asc()))
+        return list(result.scalars().all())
+
+    async def deactivate_device_clients(self, device_id: int) -> int:
+        """Deactivate every active VPN client bound to one device."""
+        clients = await self.list_device_clients(device_id, active_only=True)
+        for client in clients:
+            await self.deactivate_client(client)
+        return len(clients)
 
     async def provision_internal_client(
         self,

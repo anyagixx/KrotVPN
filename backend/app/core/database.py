@@ -86,6 +86,7 @@ async def migrate_existing_schema(conn) -> None:
     # Keep this list additive and defensive. Startup executes it automatically,
     # so any migration bug here affects every application boot.
     await _ensure_subscription_internal_access_columns(conn)
+    await _ensure_plan_device_limit_column(conn)
     await _ensure_vpn_client_topology_columns(conn)
     await _ensure_vpn_client_device_columns(conn)
     await _migrate_legacy_vpn_servers_to_nodes(conn)
@@ -261,6 +262,19 @@ async def _ensure_subscription_internal_access_columns(conn) -> None:
             text("ALTER TABLE subscriptions ADD COLUMN access_label VARCHAR(100)")
         )
         logger.info("[DB] Added subscriptions.access_label compatibility column")
+
+
+async def _ensure_plan_device_limit_column(conn) -> None:
+    """Add device_limit to plans on already deployed databases."""
+    has_plans = await conn.run_sync(_table_exists, "plans")
+    if not has_plans:
+        return
+
+    if not await conn.run_sync(_table_has_column, "plans", "device_limit"):
+        await conn.execute(
+            text("ALTER TABLE plans ADD COLUMN device_limit INTEGER DEFAULT 1")
+        )
+        logger.info("[DB] Added plans.device_limit compatibility column")
 
 
 async def _migrate_legacy_vpn_servers_to_nodes(conn) -> None:

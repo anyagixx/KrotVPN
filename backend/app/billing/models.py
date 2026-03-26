@@ -3,6 +3,7 @@ Billing models for subscriptions and payments.
 
 CHANGE_SUMMARY
 - 2026-03-26: Added explicit complimentary-access fields so internal non-billable clients can stay inside normal subscription state.
+- 2026-03-27: Added per-plan device limits for device-bound access control and anti-sharing enforcement.
 """
 # <!-- GRACE: module="M-004" entity="Plan, Subscription, Payment" -->
 
@@ -55,6 +56,7 @@ class Plan(SQLModel, table=True):
     
     # Duration
     duration_days: int = Field(ge=1, default=30)
+    device_limit: int = Field(ge=1, default=1)
     
     # Features (JSON string)
     features: str | None = Field(default=None)

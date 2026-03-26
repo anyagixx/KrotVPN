@@ -3,7 +3,7 @@
 <verification-plan>
   <meta>
     <project-name>KrotVPN</project-name>
-    <version>2.6.1</version>
+    <version>2.7.0</version>
     <updated>2026-03-27</updated>
   </meta>
 
@@ -12,6 +12,8 @@
     <principle>Domain-aware routing is not verified unless domain rules, DNS binding and host-level runtime sync are checked together.</principle>
     <principle>If host tools or dependencies are unavailable, the report must state the exact blocked command and missing prerequisite.</principle>
     <principle>Manual operator-issued VPN configs are not verified unless they are generated through the same backend provisioning and config-rendering path as the working web flow.</principle>
+    <principle>Per-plan device limits are not trusted unless device creation, revoke and rotate operations are verified against explicit active-device counts.</principle>
+    <principle>Anti-sharing enforcement must separate deterministic device-limit checks from probabilistic handshake anomaly signals and should default to detect-first evidence before auto-blocking.</principle>
   </verification-philosophy>
 
   <critical-flows>
@@ -22,6 +24,11 @@
     <CF-005>unknown domain -> CIDR fallback -> RU baseline or default path remains backward compatible</CF-005>
     <CF-006>manual internal client command -> complimentary access grant -> vpn client provisioning -> working config export</CF-006>
     <CF-007>repeat manual internal client command -> same identity reuse or explicit reprovision -> no silent duplicate active client</CF-007>
+    <CF-008>user with active subscription -> create device -> plan device limit enforced before peer provisioning</CF-008>
+    <CF-009>user revokes one device -> slot is freed -> user creates a new device -> new peer works and old peer stops</CF-009>
+    <CF-010>user rotates a compromised device config -> same logical device remains -> old peer stops -> new peer works</CF-010>
+    <CF-011>same peer reused from suspiciously different endpoints -> anomaly event recorded -> admin can block only that device</CF-011>
+    <CF-012>blocked device peer stays unusable while unrelated devices under the same user remain functional</CF-012>
   </critical-flows>
 
   <verification-matrix>
@@ -64,6 +71,36 @@
       <success>Operator CLI issues a working config through backend provisioning and config rendering, and repeated issuance stays idempotent unless reprovision is explicit.</success>
       <failure>CLI falls back to raw host-only config generation, or duplicate active client state is created for the same internal identity.</failure>
       <required-trace>VPN_MANUAL_CLIENT_REQUESTED VPN_MANUAL_CLIENT_PROVISIONED VPN_CONFIG_RENDERED</required-trace>
+    </scenario>
+    <scenario id="VM-009" module="V-M-021" evidence="deterministic-plus-state">
+      <success>Device creation is rejected when active device count has reached the effective plan limit.</success>
+      <failure>A new peer is provisioned despite the plan limit, or the system counts revoked or blocked devices incorrectly.</failure>
+      <required-trace>VPN_DEVICE_CREATE_REQUESTED VPN_DEVICE_LIMIT_REJECTED</required-trace>
+    </scenario>
+    <scenario id="VM-010" module="V-M-022" evidence="integration">
+      <success>Revoking a device disables only that device peer and allows a new device to be created in the freed slot.</success>
+      <failure>Old peer remains active, slot is not freed, or another unrelated device is affected.</failure>
+      <required-trace>VPN_DEVICE_REVOKED VPN_DEVICE_CREATED</required-trace>
+    </scenario>
+    <scenario id="VM-011" module="V-M-022" evidence="integration">
+      <success>Rotating a config keeps the same logical device but replaces its peer and invalidates the old config.</success>
+      <failure>Rotate creates a hidden second device or leaves the old peer usable.</failure>
+      <required-trace>VPN_DEVICE_CONFIG_ROTATED VPN_PEER_APPLIED</required-trace>
+    </scenario>
+    <scenario id="VM-012" module="V-M-023" evidence="trace-plus-state">
+      <success>Suspicious endpoint churn or near-concurrent peer reuse produces a stable anomaly event and raises device suspicion without immediately corrupting unrelated device state.</success>
+      <failure>Suspicious reuse leaves no structured evidence, or the wrong device is blamed.</failure>
+      <required-trace>VPN_HANDSHAKE_OBSERVED VPN_HANDSHAKE_ENDPOINT_CHANGED VPN_HANDSHAKE_CONCURRENCY_SUSPECTED</required-trace>
+    </scenario>
+    <scenario id="VM-013" module="V-M-024" evidence="integration-plus-auth">
+      <success>Admin can block or unblock a specific device peer and non-admin users cannot invoke the same enforcement surface.</success>
+      <failure>Enforcement bypasses auth or disables the whole user account instead of the targeted device.</failure>
+      <required-trace>VPN_DEVICE_BLOCKED VPN_DEVICE_UNBLOCKED</required-trace>
+    </scenario>
+    <scenario id="VM-014" module="V-M-025" evidence="deterministic">
+      <success>Every device lifecycle or anomaly transition produces an audit record with device_id, user_id and event type.</success>
+      <failure>Security-relevant actions occur without a durable audit trail.</failure>
+      <required-trace>VPN_DEVICE_AUDIT_RECORDED</required-trace>
     </scenario>
   </verification-matrix>
 
@@ -166,6 +203,36 @@
       <tests>backend/tests/test_manual_client_cli.py</tests>
       <anchors>VPN_MANUAL_CLIENT_REQUESTED VPN_MANUAL_CLIENT_PROVISIONED VPN_CONFIG_RENDERED VPN_MANUAL_CLIENT_OUTPUT_WRITTEN</anchors>
     </V-M-019>
+    <V-M-020 module="device-registry">
+      <checks>Device records preserve active, revoked, blocked and replaced lifecycle state; migrated legacy clients become deterministic primary devices without losing peer linkage.</checks>
+      <tests>backend/tests/test_device_registry.py backend/tests/test_device_migration.py</tests>
+      <anchors>VPN_DEVICE_CREATED VPN_DEVICE_AUDIT_RECORDED</anchors>
+    </V-M-020>
+    <V-M-021 module="device-access-policy">
+      <checks>Effective plan device limits are enforced before provisioning, revoked devices free slots, blocked devices do not silently bypass policy, and rotate preserves logical device identity.</checks>
+      <tests>backend/tests/test_device_access_policy.py</tests>
+      <anchors>VPN_DEVICE_CREATE_REQUESTED VPN_DEVICE_LIMIT_REJECTED VPN_DEVICE_REVOKED VPN_DEVICE_CONFIG_ROTATED VPN_DEVICE_BLOCKED</anchors>
+    </V-M-021>
+    <V-M-022 module="device-provisioning-api">
+      <checks>User-facing device APIs expose only the caller’s devices, allow deterministic create or revoke or rotate flows, and keep one peer per logical device.</checks>
+      <tests>backend/tests/test_device_api.py backend/tests/test_vpn_router_compat.py</tests>
+      <anchors>VPN_DEVICE_CREATED VPN_DEVICE_REVOKED VPN_DEVICE_CONFIG_ROTATED VPN_CONFIG_RENDERED</anchors>
+    </V-M-022>
+    <V-M-023 module="handshake-anomaly-detector">
+      <checks>Handshake observation updates device last-seen state, flags suspicious endpoint churn or near-concurrent reuse, and does not leak secrets or raw private peer material into logs.</checks>
+      <tests>backend/tests/test_handshake_anomaly_detector.py</tests>
+      <anchors>VPN_HANDSHAKE_OBSERVED VPN_HANDSHAKE_ENDPOINT_CHANGED VPN_HANDSHAKE_CONCURRENCY_SUSPECTED VPN_DEVICE_SUSPICION_ESCALATED</anchors>
+    </V-M-023>
+    <V-M-024 module="device-admin-control">
+      <checks>Admin endpoints can list devices, view anomaly state and block or unblock or revoke a specific device peer while preserving user-level auth boundaries.</checks>
+      <tests>backend/tests/test_admin_device_control.py</tests>
+      <anchors>VPN_DEVICE_BLOCKED VPN_DEVICE_UNBLOCKED VPN_DEVICE_REVOKED</anchors>
+    </V-M-024>
+    <V-M-025 module="device-audit-log">
+      <checks>Every device lifecycle and anomaly escalation writes an audit entry with stable event types and enough context for later investigation.</checks>
+      <tests>backend/tests/test_device_audit_log.py</tests>
+      <anchors>VPN_DEVICE_AUDIT_RECORDED</anchors>
+    </V-M-025>
   </module-verification>
 
   <change-matrix>
@@ -187,6 +254,12 @@
       <required>Confirm complimentary access remains distinguishable from paid subscriptions in state and reporting.</required>
       <required>Confirm host-level awg0 peer activation happens automatically after backend writes peer state, both for manual issuance and for web registration paths.</required>
     </manual-client-provisioning-change>
+    <device-access-change>
+      <required>Verify CF-008 through CF-012 with deterministic device counts before enabling autonomous execution on device-aware provisioning.</required>
+      <required>Confirm device-limit checks run before peer creation and before address allocation.</required>
+      <required>Confirm revoke, rotate and block flows leave an audit record and do not accidentally affect unrelated devices for the same user.</required>
+      <required>Keep anomaly detection in detect-first mode until phase-level evidence shows false positives are bounded.</required>
+    </device-access-change>
   </change-matrix>
 
   <telemetry-requirements>
@@ -198,6 +271,10 @@
       Manual provisioning logs should use stable markers in the form
       [VPN][manual][MARKER] or [Billing][internal][MARKER].
     </manual-provisioning-format>
+    <device-format>
+      Device and anti-sharing logs should use stable markers in the form
+      [VPN][device][MARKER] or [VPN][handshake][MARKER].
+    </device-format>
     <redaction>
       Do not log secrets, private keys, raw tokens, payment credentials or full sensitive payloads.
     </redaction>
@@ -207,6 +284,9 @@
     <manual-required-fields>
       internal_identity user_id access_mode complimentary subscription_id client_id route_id entry_node_id output_path reprovision
     </manual-required-fields>
+    <device-required-fields>
+      user_id device_id device_name device_status config_version peer_public_key last_endpoint suspicion_score event_type enforcement_action plan_id device_limit
+    </device-required-fields>
     <ordering>
       For trace assertions, event order matters more than prose wording. Prefer stable markers and fields over free text.
     </ordering>
@@ -214,13 +294,13 @@
 
   <verification-levels>
     <module-level>
-      Resolver precedence tests, domain normalization tests, admin auth checks, internal-access policy tests, CLI parity tests and narrow runtime sync tests.
+      Resolver precedence tests, domain normalization tests, admin auth checks, internal-access policy tests, CLI parity tests, device-limit policy tests and narrow runtime sync tests.
     </module-level>
     <wave-level>
-      Merged checks across routing, vpn and admin surfaces for domain policy mutation and decision explainability.
+      Merged checks across routing, vpn and admin surfaces for domain policy mutation, device-bound provisioning and admin enforcement.
     </wave-level>
     <phase-level>
-      Full routing migration confidence gate including rollback reasoning, host-tool assumptions, deploy impact review and manual-client provisioning parity review.
+      Full routing migration confidence gate plus device-limit and anti-sharing confidence gate including rollback reasoning, host-tool assumptions, deploy impact review, manual-client provisioning parity review and staged enforcement review.
     </phase-level>
   </verification-levels>
 
@@ -245,6 +325,18 @@
       <required>Complimentary internal access stays explicit in state and does not invoke payment-provider logic.</required>
       <required>Backend-driven peer changes become active on live awg0 without manual operator sync steps.</required>
     </Phase-5-Gate>
+    <Phase-6-Gate>
+      <required>Legacy single-client users are migrated to deterministic primary devices without losing active access.</required>
+      <required>Plan device limits are persisted and enforced before any new peer provisioning.</required>
+    </Phase-6-Gate>
+    <Phase-7-Gate>
+      <required>User device creation, revoke and rotate flows pass deterministic module-level checks and preserve one peer per logical device.</required>
+      <required>Revoking a device frees a slot; rotating a config does not silently create a second active device.</required>
+    </Phase-7-Gate>
+    <Phase-8-Gate>
+      <required>Suspicious handshake reuse leaves structured evidence, admin can review and enforce on a specific device peer, and automatic blocking remains either explicitly disabled or supported by bounded false-positive evidence.</required>
+      <required>Blocked devices do not quietly regain access through stale peers or freed slots.</required>
+    </Phase-8-Gate>
   </phase-gates>
 
   <agent-reporting>

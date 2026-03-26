@@ -3,9 +3,9 @@
 <knowledge-graph>
   <meta>
     <project-name>KrotVPN</project-name>
-    <version>2.6.1</version>
+    <version>2.7.0</version>
     <updated>2026-03-27</updated>
-    <purpose>Fast AI onboarding and navigation for the current system plus the approved routing-policy migration and manual internal client provisioning parity plan.</purpose>
+    <purpose>Fast AI onboarding and navigation for the current system plus the approved routing-policy migration, manual internal client provisioning parity plan, and device-bound access plus anti-sharing architecture.</purpose>
   </meta>
 
   <entry-points>
@@ -136,6 +136,54 @@
         <fn-export-manual-client-config>Writes config or QR output after backend provisioning succeeds</fn-export-manual-client-config>
       </exports>
     </M-019>
+    <M-020 NAME="device-registry" TYPE="DATA_LAYER" verification-ref="V-M-020">
+      <path>backend/app/vpn/models.py backend/app/devices/models.py</path>
+      <owns>device records, device lifecycle state, device-linked peer state and durable device security events</owns>
+      <exports>
+        <type-UserDevice>Logical user device with active or revoked or blocked lifecycle state</type-UserDevice>
+        <type-DeviceSecurityEvent>Audit or anomaly record for device lifecycle or anti-sharing signals</type-DeviceSecurityEvent>
+      </exports>
+    </M-020>
+    <M-021 NAME="device-access-policy" TYPE="CORE_LOGIC" verification-ref="V-M-021">
+      <path>backend/app/devices/service.py backend/app/billing/service.py backend/app/vpn/service.py</path>
+      <owns>per-plan device limit enforcement, slot accounting and device-level revoke or rotate or block decisions</owns>
+      <exports>
+        <fn-check-device-limit>Determines whether a user may create another active device under the effective plan</fn-check-device-limit>
+        <fn-apply-device-enforcement>Coordinates revoke, rotate, block and unblock state transitions for device-bound peers</fn-apply-device-enforcement>
+      </exports>
+    </M-021>
+    <M-022 NAME="device-provisioning-api" TYPE="ENTRY_POINT" verification-ref="V-M-022">
+      <path>backend/app/devices/router.py backend/app/vpn/router.py</path>
+      <owns>user-facing device management, config retrieval and device-bound provisioning APIs</owns>
+      <exports>
+        <fn-create-device>Creates a device and provisions a distinct peer or rejects on plan limit</fn-create-device>
+        <fn-rotate-device-config>Reissues peer material for one logical device while invalidating the old config</fn-rotate-device-config>
+        <fn-revoke-device>Revokes a specific device and frees or preserves a slot according to policy</fn-revoke-device>
+      </exports>
+    </M-022>
+    <M-023 NAME="handshake-anomaly-detector" TYPE="INTEGRATION" verification-ref="V-M-023">
+      <path>backend/app/vpn/handshake_monitor.py backend/app/tasks/scheduler.py</path>
+      <owns>handshake observation, endpoint churn detection, suspicion scoring and anti-sharing signal emission</owns>
+      <exports>
+        <fn-observe-peer-handshake>Records last-seen handshake and endpoint data for a device-linked peer</fn-observe-peer-handshake>
+        <fn-score-peer-anomaly>Scores suspicious concurrent or unstable reuse patterns for one peer</fn-score-peer-anomaly>
+      </exports>
+    </M-023>
+    <M-024 NAME="device-admin-control" TYPE="ENTRY_POINT" verification-ref="V-M-024">
+      <path>backend/app/admin/router.py frontend-admin</path>
+      <owns>admin review and enforcement for device state, peer blocks and anomaly investigations</owns>
+      <exports>
+        <fn-list-user-devices>Returns device and anomaly state for operator review</fn-list-user-devices>
+        <fn-admin-block-device>Blocks or unblocks one device peer without disabling unrelated account access</fn-admin-block-device>
+      </exports>
+    </M-024>
+    <M-025 NAME="device-audit-log" TYPE="DATA_LAYER" verification-ref="V-M-025">
+      <path>backend/app/devices/models.py backend/app/devices/service.py</path>
+      <owns>durable audit trail for device create, rotate, revoke, block, unblock and anomaly escalation events</owns>
+      <exports>
+        <fn-record-device-event>Writes a stable lifecycle or anomaly event for later investigation</fn-record-device-event>
+      </exports>
+    </M-025>
   </modules>
 
   <CrossLinks>
@@ -179,6 +227,19 @@
     <link from="M-019" to="M-018">CLI issuance must resolve internal identity and complimentary access before provisioning.</link>
     <link from="M-019" to="M-003">CLI issuance exports configs only after normal VPN provisioning succeeds.</link>
     <link from="M-019" to="M-012">Deploy wrapper becomes a thin shell around backend CLI instead of generating raw configs directly.</link>
+    <link from="M-003" to="M-020">VPN provisioning must bind peers to explicit device records instead of a single account-wide client.</link>
+    <link from="M-004" to="M-021">Billing plan state now shapes allowed device count and enforcement policy.</link>
+    <link from="M-006" to="M-024">Admin surfaces must expose targeted device enforcement rather than only account-level state.</link>
+    <link from="M-009" to="M-022">User dashboard must manage device-bound configs instead of a single generic config.</link>
+    <link from="M-010" to="M-024">Admin UI must render device and anomaly review controls.</link>
+    <link from="M-020" to="M-021">Device records drive limit accounting and enforcement decisions.</link>
+    <link from="M-021" to="M-022">User-facing device actions must pass through device-access policy before provisioning or enforcement.</link>
+    <link from="M-021" to="M-023">Anomaly detector escalates into explicit device policy actions rather than mutating peers directly.</link>
+    <link from="M-021" to="M-025">Every enforcement action must be audit-recorded.</link>
+    <link from="M-022" to="M-003">Device provisioning APIs still rely on the main VPN provisioning and config generation path.</link>
+    <link from="M-023" to="M-003">Handshake observations originate from VPN peer state and runtime visibility.</link>
+    <link from="M-023" to="M-025">Suspicious peer reuse must leave durable security events.</link>
+    <link from="M-024" to="M-025">Admin actions must be traceable in the audit log.</link>
   </CrossLinks>
 
   <hotspots>
@@ -189,6 +250,9 @@
     <H-005 module="M-017">Incremental route sync is safer than full refresh but easier to get wrong.</H-005>
     <H-006 module="M-018">Complimentary internal access must stay explicit or billing and analytics will silently drift.</H-006>
     <H-007 module="M-019">Manual client issuance is unsafe if shell scripts bypass backend topology and config generation logic.</H-007>
+    <H-008 module="M-020">Device migration is risky because legacy users already have live peers that must become deterministic primary devices.</H-008>
+    <H-009 module="M-023">Handshake anomaly detection can produce false positives on mobile networks if endpoint churn rules are too aggressive.</H-009>
+    <H-010 module="M-024">Device block or revoke must target only one peer or operators will accidentally disable whole accounts.</H-010>
   </hotspots>
 
   <agent-navigation>
@@ -207,5 +271,9 @@
       For manual client provisioning work, open deploy/create-client.sh, backend/app/cli.py,
       backend/app/users/service.py, backend/app/billing/service.py and backend/app/vpn/service.py before changing code.
     </manual-client-entry>
+    <device-sharing-entry>
+      For device-limit and anti-sharing work, open backend/app/vpn/models.py, backend/app/vpn/service.py,
+      backend/app/billing/models.py, backend/app/admin/router.py, backend/app/vpn/router.py and any future backend/app/devices module before changing code.
+    </device-sharing-entry>
   </agent-navigation>
 </knowledge-graph>

@@ -320,7 +320,7 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(python3 -c "import secrets; print(secrets.to
 
 cat > .env << EOF
 APP_NAME=KrotVPN
-APP_VERSION=2.4.20
+APP_VERSION=2.4.24
 DEBUG=false
 ENVIRONMENT=production
 HOST=0.0.0.0

@@ -11,6 +11,7 @@ CHANGE_SUMMARY
 - 2026-03-26: Added internal-client provisioning helper and stable provisioning/config-render trace markers for manual CLI parity.
 - 2026-03-27: Added device-scoped client lookup helpers so revoke or block policy can target peer state through the existing VPN service.
 - 2026-03-27: Relaxed user-level lookup and added optional device-bound provisioning during the multi-device migration window.
+- 2026-03-27: Added explicit device reprovision helper so rotate flows can refresh one device config without changing logical ownership.
 """
 # <!-- GRACE: module="M-003" contract="vpn-service" -->
 
@@ -287,6 +288,42 @@ class VPNService:
         existing = await self.get_user_client(user_id, active_only=False)
         if existing is None:
             return await self.create_client(user_id)
+
+        route, entry_node, exit_node, server = await self._select_topology_for_existing_client(existing)
+        if entry_node is None and server is not None:
+            _, entry_node, exit_node = await self._resolve_topology_for_server(server)
+        if entry_node is not None:
+            server = await self.get_legacy_server_for_node(entry_node)
+        if not server or entry_node is None:
+            raise ValueError("No available VPN servers")
+
+        if existing.is_active:
+            await self.deactivate_client(existing)
+
+        reprovisioned = await self._reprovision_client(
+            existing,
+            server,
+            route=route,
+            entry_node=entry_node,
+            exit_node=exit_node,
+        )
+        await self.session.refresh(reprovisioned)
+        return reprovisioned
+
+    async def provision_device_client(
+        self,
+        user_id: int,
+        device_id: int,
+        *,
+        reprovision: bool = False,
+    ) -> VPNClient:
+        """Create, reuse, or explicitly reprovision the peer for one logical device."""
+        if not reprovision:
+            return await self.create_client(user_id, device_id=device_id)
+
+        existing = await self.get_device_client(device_id, active_only=False)
+        if existing is None:
+            return await self.create_client(user_id, device_id=device_id)
 
         route, entry_node, exit_node, server = await self._select_topology_for_existing_client(existing)
         if entry_node is None and server is not None:

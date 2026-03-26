@@ -10,6 +10,7 @@ MODULE_CONTRACT
 MODULE_MAP
 - DeviceLimitExceededError: Raised when provisioning would exceed the effective device limit.
 - DeviceAccessPolicyService: Coordinates per-user device slots and device lifecycle transitions.
+- get_user_device: Resolves one owned device for authenticated API flows.
 - get_effective_device_limit: Resolves the current device limit from active billing state.
 - assert_can_create_device: Rejects provisioning before peer creation if the user has no available device slot.
 - create_device_record: Persists a new active device and records an audit event.
@@ -62,6 +63,16 @@ class DeviceAccessPolicyService:
             .order_by(UserDevice.created_at.asc(), UserDevice.id.asc())
         )
         return list(result.scalars().all())
+
+    async def get_user_device(self, user_id: int, device_id: int) -> UserDevice | None:
+        """Return one device only if it belongs to the requested user."""
+        result = await self.session.execute(
+            select(UserDevice).where(
+                UserDevice.id == device_id,
+                UserDevice.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
 
     async def get_consumed_device_count(self, user_id: int) -> int:
         """Return the number of slots currently consumed by active or blocked devices."""

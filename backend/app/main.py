@@ -1,6 +1,12 @@
 """
 KrotVPN - Commercial VPN Service with AmneziaWG
 Main FastAPI application.
+
+GRACE-lite entry contract:
+- This is the backend runtime entry point and router assembly root.
+- Lifespan startup is side-effectful: DB init, admin bootstrap, VPN bootstrap and scheduler start happen here.
+- Production and non-production differ in routing initialization behavior.
+- Any startup change here can affect the whole product surface at boot time.
 """
 # <!-- GRACE: entry-point="EP-001" -->
 
@@ -35,6 +41,7 @@ from app.billing.router import admin_router as admin_billing_router
 from app.referrals.router import router as referral_router
 from app.referrals.router import admin_router as admin_referral_router
 from app.admin.router import router as admin_router
+from app.devices.router import router as devices_router
 
 # Configure logging
 try:
@@ -57,6 +64,8 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
+    # Startup order matters: DB first, bootstrap second, scheduler last.
+    # If initialization behavior changes, keep docs/current-status.xml and docs/knowledge-graph.xml in sync.
     # Startup
     logger.info(f"[APP] Starting {settings.app_name} v{settings.app_version}")
     logger.info(f"[APP] Environment: {settings.environment}")
@@ -176,6 +185,7 @@ app.include_router(admin_users_router)
 
 # VPN
 app.include_router(vpn_router)
+app.include_router(devices_router)
 app.include_router(admin_vpn_router)
 app.include_router(admin_vpn_nodes_router)
 app.include_router(admin_vpn_routes_router)

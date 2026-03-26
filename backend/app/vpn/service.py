@@ -1,11 +1,21 @@
 """
 VPN service for business logic.
+
+GRACE-lite module contract:
+- Owns VPN client provisioning, topology selection and config generation.
+- New topology model is `VPNNode` + `VPNRoute`; `VPNServer` remains a legacy compatibility mirror.
+- Invariant: one `VPNClient` per user, with topology fields preferred over legacy `server_id`.
+- This module is host-coupled through AmneziaWG tools and should be treated as infrastructure-sensitive code.
+
+CHANGE_SUMMARY
+- 2026-03-26: Added internal-client provisioning helper and stable provisioning/config-render trace markers for manual CLI parity.
 """
 # <!-- GRACE: module="M-003" contract="vpn-service" -->
 
 from datetime import datetime
 from typing import Any
 
+from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -131,6 +141,8 @@ class VPNService:
         Returns:
             Created VPNClient
         """
+        # Provisioning logic must preserve the single-client-per-user invariant even
+        # while the project is migrating from legacy server assignment to route-aware topology.
         existing_client = await self.get_user_client(user_id, active_only=False)
         route: VPNRoute | None = None
         entry_node: VPNNode | None = None
@@ -227,6 +239,41 @@ class VPNService:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
+    async def provision_internal_client(
+        self,
+        user_id: int,
+        *,
+        reprovision: bool = False,
+    ) -> VPNClient:
+        """Create, reuse, or explicitly reprovision a client for the internal CLI path."""
+        if not reprovision:
+            return await self.create_client(user_id)
+
+        existing = await self.get_user_client(user_id, active_only=False)
+        if existing is None:
+            return await self.create_client(user_id)
+
+        route, entry_node, exit_node, server = await self._select_topology_for_existing_client(existing)
+        if entry_node is None and server is not None:
+            _, entry_node, exit_node = await self._resolve_topology_for_server(server)
+        if entry_node is not None:
+            server = await self.get_legacy_server_for_node(entry_node)
+        if not server or entry_node is None:
+            raise ValueError("No available VPN servers")
+
+        if existing.is_active:
+            await self.deactivate_client(existing)
+
+        reprovisioned = await self._reprovision_client(
+            existing,
+            server,
+            route=route,
+            entry_node=entry_node,
+            exit_node=exit_node,
+        )
+        await self.session.refresh(reprovisioned)
+        return reprovisioned
+
     async def get_client_config(self, client: VPNClient) -> VPNConfig:
         """
         Generate VPN configuration for client.
@@ -261,6 +308,11 @@ class VPNService:
             address=client.address,
             server_public_key=entry_node.public_key if entry_node.public_key else (server.public_key if server else ""),
             endpoint=endpoint,
+        )
+        logger.info(
+            "[VPN][config][VPN_CONFIG_RENDERED] "
+            f"user_id={client.user_id} client_id={client.id} route_id={client.route_id} "
+            f"entry_node_id={client.entry_node_id} resolved_endpoint={endpoint}"
         )
         
         return VPNConfig(
@@ -880,6 +932,11 @@ class VPNService:
         self.session.add(client)
 
         await self.wg.add_peer(public_key, address)
+        logger.info(
+            "[VPN][peer][VPN_PEER_APPLIED] "
+            f"user_id={user_id} client_id={client.id} address={address} "
+            f"route_id={client.route_id} entry_node_id={client.entry_node_id} reprovision=false"
+        )
         server.current_clients += 1
         await self._apply_topology_client_delta(client, 1)
         await self.session.flush()
@@ -923,6 +980,11 @@ class VPNService:
         client.updated_at = datetime.utcnow()
 
         await self.wg.add_peer(public_key, address)
+        logger.info(
+            "[VPN][peer][VPN_PEER_APPLIED] "
+            f"user_id={client.user_id} client_id={client.id} address={address} "
+            f"route_id={client.route_id} entry_node_id={client.entry_node_id} reprovision=true"
+        )
         server.current_clients += 1
         await self._apply_topology_client_delta_by_ids(previous_route_id, previous_entry_node_id, previous_exit_node_id, -1)
         await self._apply_topology_client_delta(client, 1)

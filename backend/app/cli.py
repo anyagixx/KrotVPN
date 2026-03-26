@@ -8,20 +8,28 @@ Usage:
     python -m app.cli reset-password --email admin@example.com --password newsecret
     python -m app.cli list-admins
     python -m app.cli check-config
+    python -m app.cli create-internal-client --identity family-phone --output /tmp/family-phone.conf
+
+CHANGE_SUMMARY
+- 2026-03-26: Added backend CLI command for internal non-billable client issuance through the normal VPN provisioning path.
 """
 # <!-- GRACE: module="M-007" contract="cli-tools" -->
 
 import argparse
 import asyncio
 import sys
-from typing import Optional
+from pathlib import Path
 
+from loguru import logger
 from sqlalchemy import select
 
+from app.billing.service import BillingService
 from app.core.config import settings
 from app.core.database import async_session_maker, init_db
 from app.core.init_admin import create_admin_user, reset_admin_password
 from app.users.models import User, UserRole
+from app.users.service import UserService
+from app.vpn.service import VPNService
 
 
 def print_success(msg: str) -> None:
@@ -200,6 +208,100 @@ async def cmd_check_config() -> int:
         return 0
 
 
+async def issue_internal_client(
+    identity: str,
+    *,
+    output: str | None = None,
+    display_name: str | None = None,
+    access_label: str = "internal-unlimited",
+    reprovision: bool = False,
+):
+    """Resolve internal access and export a VPN config through backend services."""
+    logger.info(
+        "[VPN][manual][VPN_MANUAL_CLIENT_REQUESTED] "
+        f"internal_identity={identity} access_label={access_label} reprovision={reprovision}"
+    )
+
+    async with async_session_maker() as session:
+        user_service = UserService(session)
+        billing_service = BillingService(session)
+        vpn_service = VPNService(session)
+
+        user = await user_service.resolve_internal_user(
+            identity,
+            display_name=display_name,
+        )
+        subscription = await billing_service.ensure_complimentary_access(
+            user.id,
+            access_label=access_label,
+        )
+        client = await vpn_service.provision_internal_client(
+            user.id,
+            reprovision=reprovision,
+        )
+        config = await vpn_service.get_client_config(client)
+        await session.commit()
+
+    logger.info(
+        "[VPN][manual][VPN_MANUAL_CLIENT_PROVISIONED] "
+        f"internal_identity={identity} user_id={user.id} client_id={client.id} "
+        f"subscription_id={subscription.id} reprovision={reprovision}"
+    )
+    return user, subscription, client, config
+
+
+async def cmd_create_internal_client(
+    identity: str,
+    *,
+    output: str | None = None,
+    display_name: str | None = None,
+    access_label: str = "internal-unlimited",
+    reprovision: bool = False,
+) -> int:
+    """Create or reuse an internal user and export a working VPN config."""
+    try:
+        await init_db()
+        user, subscription, client, config = await issue_internal_client(
+            identity,
+            output=output,
+            display_name=display_name,
+            access_label=access_label,
+            reprovision=reprovision,
+        )
+
+        if output:
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(config.config, encoding="utf-8")
+            logger.info(
+                "[VPN][manual][VPN_MANUAL_CLIENT_OUTPUT_WRITTEN] "
+                f"internal_identity={identity} user_id={user.id} client_id={client.id} "
+                f"subscription_id={subscription.id} output_path={output_path} reprovision={reprovision}"
+            )
+            print_success(f"Internal client config saved: {output_path}")
+            print_info(
+                f"user_id={user.id} subscription_id={subscription.id} "
+                f"client_id={client.id} address={config.address}"
+            )
+        else:
+            sys.stdout.write(config.config)
+            if not config.config.endswith("\n"):
+                sys.stdout.write("\n")
+            logger.info(
+                "[VPN][manual][VPN_MANUAL_CLIENT_OUTPUT_WRITTEN] "
+                f"internal_identity={identity} user_id={user.id} client_id={client.id} "
+                f"subscription_id={subscription.id} output_path=stdout reprovision={reprovision}"
+            )
+
+        return 0
+    except ValueError as e:
+        print_error(str(e))
+        return 1
+    except Exception as e:
+        print_error(f"Failed to create internal client: {e}")
+        return 1
+
+
 def main() -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -271,6 +373,36 @@ Examples:
         "check-config",
         help="Check admin configuration",
     )
+
+    internal_client_parser = subparsers.add_parser(
+        "create-internal-client",
+        help="Create or reuse an internal complimentary VPN client",
+    )
+    internal_client_parser.add_argument(
+        "--identity", "-i",
+        required=True,
+        help="Stable identity for the internal client, e.g. family-phone",
+    )
+    internal_client_parser.add_argument(
+        "--display-name", "-n",
+        default=None,
+        help="Optional display name for the internal user",
+    )
+    internal_client_parser.add_argument(
+        "--access-label", "-l",
+        default="internal-unlimited",
+        help="Explicit complimentary access label",
+    )
+    internal_client_parser.add_argument(
+        "--output", "-o",
+        default=None,
+        help="Optional path where the rendered config will be written",
+    )
+    internal_client_parser.add_argument(
+        "--reprovision", "-r",
+        action="store_true",
+        help="Force key and peer reprovision instead of reusing an existing active client",
+    )
     
     args = parser.parse_args()
     
@@ -295,7 +427,15 @@ Examples:
         return asyncio.run(cmd_list_admins())
     elif args.command == "check-config":
         return asyncio.run(cmd_check_config())
-    
+    elif args.command == "create-internal-client":
+        return asyncio.run(cmd_create_internal_client(
+            identity=args.identity,
+            output=args.output,
+            display_name=args.display_name,
+            access_label=args.access_label,
+            reprovision=args.reprovision,
+        ))
+
     return 0
 
 

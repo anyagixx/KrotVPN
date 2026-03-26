@@ -1,5 +1,11 @@
 """
 User API router.
+
+GRACE-lite module contract:
+- Exposes auth, current-user and admin user-management endpoints.
+- Registration is intentionally side-effectful: it may create trial subscription,
+  VPN access and referral linkage in the same request path.
+- Telegram auth accepts either a valid Telegram-signed payload or an internal bot call header.
 """
 # <!-- GRACE: module="M-002" api-group="Auth API, User API" -->
 
@@ -35,6 +41,8 @@ from app.users.schemas import (
     UserUpdate,
 )
 from app.users.service import UserService
+from app.devices.service import DeviceAccessPolicyService
+from app.vpn.service import VPNService
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 users_router = APIRouter(prefix="/api/users", tags=["users"])
@@ -49,12 +57,14 @@ async def _initialize_new_user_resources(
     session: DBSession,
 ) -> None:
     """Create trial, VPN access, and referral records for newly registered users."""
+    # This helper is the main post-registration orchestrator. Failures in VPN provisioning
+    # should degrade gracefully instead of blocking account creation.
     from app.billing.service import BillingService
     from app.referrals.service import ReferralService
-    from app.vpn.service import VPNService
 
     billing_service = BillingService(session)
     referral_service = ReferralService(session)
+    device_policy = DeviceAccessPolicyService(session)
     vpn_service = VPNService(session)
 
     history = await billing_service.get_user_subscription_history(user_id, limit=1)
@@ -64,7 +74,16 @@ async def _initialize_new_user_resources(
     existing_client = await vpn_service.get_user_client(user_id)
     if not existing_client:
         try:
-            await vpn_service.create_client(user_id)
+            primary_device = await device_policy.ensure_primary_device(
+                user_id,
+                name="Primary device",
+                platform="web-default",
+            )
+            await vpn_service.provision_device_client(
+                user_id,
+                int(primary_device.id),
+                reprovision=False,
+            )
         except ValueError as exc:
             # Registration should not fail if infrastructure is not ready yet.
             # The UI will show a clear "config unavailable" state instead.

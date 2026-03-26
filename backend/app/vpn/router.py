@@ -1,5 +1,10 @@
 """
 VPN API router.
+
+GRACE-lite module contract:
+- User-facing source of truth for config delivery, QR delivery and client stats.
+- Admin-facing compatibility endpoints still exist for legacy `/admin/servers` clients.
+- Prefer node/route endpoints for new work; treat legacy server endpoints as compatibility shims.
 """
 # <!-- GRACE: module="M-003" api-group="VPN API" -->
 
@@ -11,6 +16,9 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.core import CurrentAdmin, CurrentUser, DBSession
+from app.billing.service import BillingService
+from app.devices.models import DeviceStatus
+from app.devices.service import DeviceAccessPolicyService, DeviceLimitExceededError
 from app.vpn.models import VPNClient
 from app.vpn.schemas import (
     NodeCreate,
@@ -71,21 +79,47 @@ async def get_or_provision_user_client(
     session: DBSession,
 ) -> VPNClient | None:
     """Return existing VPN client or provision one for users with active access."""
+    # This helper intentionally couples billing access and provisioning:
+    # user-facing config endpoints should opportunistically self-heal missing VPN clients.
     service = VPNService(session)
-    client = await service.get_user_client(user_id)
-    if client is not None:
-        return client
-
-    from app.billing.service import BillingService
-
     billing_service = BillingService(session)
     subscription = await billing_service.get_user_subscription(user_id)
     if not subscription:
         return None
 
+    policy = DeviceAccessPolicyService(session)
+    devices = await policy.list_user_devices(user_id)
+    active_device = next((device for device in devices if device.status is DeviceStatus.ACTIVE), None)
+
+    if active_device is not None:
+        client = await service.get_device_client(int(active_device.id))
+        if client is not None:
+            return client
+        try:
+            return await service.provision_device_client(
+                user_id,
+                int(active_device.id),
+                reprovision=False,
+            )
+        except ValueError:
+            return None
+
+    legacy_client = await service.get_user_client(user_id)
+    if legacy_client is not None and legacy_client.device_id is None:
+        return legacy_client
+
     try:
-        return await service.create_client(user_id)
-    except ValueError:
+        primary_device = await policy.ensure_primary_device(
+            user_id,
+            name="Primary device",
+            platform="web-default",
+        )
+        return await service.provision_device_client(
+            user_id,
+            int(primary_device.id),
+            reprovision=False,
+        )
+    except (ValueError, DeviceLimitExceededError):
         return None
 
 

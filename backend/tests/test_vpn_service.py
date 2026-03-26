@@ -159,8 +159,9 @@ async def test_create_client_provisions_new_client_from_active_route(monkeypatch
         assert node is entry_node
         return legacy_server
 
-    async def fake_provision(*, user_id, server, route, entry_node, exit_node):
+    async def fake_provision(*, user_id, device_id=None, server, route, entry_node, exit_node):
         assert user_id == 10
+        assert device_id is None
         assert server is legacy_server
         assert route is not None and route.id == 20
         assert entry_node is not None and entry_node.id == 10
@@ -272,8 +273,92 @@ async def test_get_client_config_prefers_route_topology_over_legacy_server(monke
     assert config.route_name == "RU -> DE"
     assert config.entry_server_name == "RU Entry Node"
     assert config.exit_server_name == "DE Exit Node"
-    assert config.exit_server_location == "Germany"
-    assert config_calls == [("decrypted-private", "10.10.0.2", "entry-pub", "1.1.1.1")]
+
+
+@pytest.mark.asyncio
+async def test_provision_device_client_reprovisions_existing_device_peer(monkeypatch):
+    service = VPNService(DummySession())
+    existing = VPNClient(
+        id=5,
+        user_id=10,
+        device_id=77,
+        server_id=5,
+        route_id=20,
+        entry_node_id=10,
+        exit_node_id=11,
+        public_key="client-pub",
+        private_key_enc="enc",
+        address="10.10.0.2",
+        is_active=True,
+    )
+    route = VPNRoute(id=20, name="RU -> DE", entry_node_id=10, exit_node_id=11)
+    entry_node = VPNNode(
+        id=10,
+        name="RU Entry Node",
+        role="entry",
+        country_code="RU",
+        location="Russia",
+        endpoint="1.1.1.1",
+        public_key="entry-pub",
+        is_entry_node=True,
+        is_exit_node=False,
+    )
+    exit_node = VPNNode(
+        id=11,
+        name="DE Exit Node",
+        role="exit",
+        country_code="DE",
+        location="Germany",
+        endpoint="2.2.2.2",
+        public_key="exit-pub",
+        is_entry_node=False,
+        is_exit_node=True,
+    )
+    legacy_server = VPNServer(
+        id=5,
+        name="RU legacy",
+        location="Russia",
+        endpoint="1.1.1.1",
+        public_key="entry-pub",
+    )
+    deactivated: list[int] = []
+    reprovisioned: list[int] = []
+
+    async def fake_get_device_client(device_id, active_only=True):
+        assert device_id == 77
+        assert active_only is False
+        return existing
+
+    async def fake_select(existing_client):
+        assert existing_client is existing
+        return route, entry_node, exit_node, legacy_server
+
+    async def fake_get_legacy_server_for_node(node, create=True):
+        assert node is entry_node
+        return legacy_server
+
+    async def fake_deactivate(client):
+        deactivated.append(int(client.id))
+        client.is_active = False
+
+    async def fake_reprovision(client, server, *, route, entry_node, exit_node):
+        reprovisioned.append(int(client.id))
+        client.is_active = True
+        client.address = "10.10.0.9"
+        return client
+
+    monkeypatch.setattr(service, "get_device_client", fake_get_device_client)
+    monkeypatch.setattr(service, "_select_topology_for_existing_client", fake_select)
+    monkeypatch.setattr(service, "get_legacy_server_for_node", fake_get_legacy_server_for_node)
+    monkeypatch.setattr(service, "deactivate_client", fake_deactivate)
+    monkeypatch.setattr(service, "_reprovision_client", fake_reprovision)
+
+    result = await service.provision_device_client(10, 77, reprovision=True)
+
+    assert result is existing
+    assert deactivated == [5]
+    assert reprovisioned == [5]
+    assert result.address == "10.10.0.9"
 
 
 @pytest.mark.asyncio

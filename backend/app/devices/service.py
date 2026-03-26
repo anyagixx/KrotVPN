@@ -11,6 +11,7 @@ MODULE_MAP
 - DeviceLimitExceededError: Raised when provisioning would exceed the effective device limit.
 - DeviceAccessPolicyService: Coordinates per-user device slots and device lifecycle transitions.
 - get_user_device: Resolves one owned device for authenticated API flows.
+- ensure_primary_device: Reuses the first active device or creates a compatibility primary device for legacy web flows.
 - get_effective_device_limit: Resolves the current device limit from active billing state.
 - assert_can_create_device: Rejects provisioning before peer creation if the user has no available device slot.
 - create_device_record: Persists a new active device and records an audit event.
@@ -73,6 +74,20 @@ class DeviceAccessPolicyService:
             )
         )
         return result.scalar_one_or_none()
+
+    async def ensure_primary_device(
+        self,
+        user_id: int,
+        *,
+        name: str = "Primary device",
+        platform: str | None = "web-default",
+    ) -> UserDevice:
+        """Reuse the first active device or create a compatibility primary device."""
+        devices = await self.list_user_devices(user_id)
+        for device in devices:
+            if device.status is DeviceStatus.ACTIVE:
+                return device
+        return await self.create_device_record(user_id, name=name, platform=platform)
 
     async def get_consumed_device_count(self, user_id: int) -> int:
         """Return the number of slots currently consumed by active or blocked devices."""

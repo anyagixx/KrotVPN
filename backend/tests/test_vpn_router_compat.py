@@ -1,8 +1,10 @@
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.core import get_current_user
 from app.core.database import get_session
+from app.devices.models import DeviceStatus, UserDevice
 from app.vpn import router as vpn_router_module
 
 
@@ -94,3 +96,57 @@ def test_public_nodes_endpoint_returns_route_aware_nodes(monkeypatch):
     body = response.json()
     assert len(body["nodes"]) == 2
     assert {item["role"] for item in body["nodes"]} == {"entry", "exit"}
+
+
+@pytest.mark.asyncio
+async def test_get_or_provision_user_client_prefers_active_primary_device(monkeypatch):
+    device = UserDevice(
+        id=21,
+        user_id=1,
+        device_key="device-21",
+        name="Primary device",
+        platform="web-default",
+        status=DeviceStatus.ACTIVE,
+    )
+
+    class StubVPNService:
+        def __init__(self, session):
+            self.session = session
+
+        async def get_device_client(self, device_id, active_only=True):
+            assert device_id == 21
+            assert active_only is True
+            return None
+
+        async def provision_device_client(self, user_id, device_id, *, reprovision=False):
+            assert user_id == 1
+            assert device_id == 21
+            assert reprovision is False
+            return {"client_id": 99, "device_id": 21}
+
+        async def get_user_client(self, user_id):
+            raise AssertionError("legacy user client fallback should not be used when active device exists")
+
+    class StubBillingService:
+        def __init__(self, session):
+            self.session = session
+
+        async def get_user_subscription(self, user_id):
+            assert user_id == 1
+            return object()
+
+    class StubDevicePolicyService:
+        def __init__(self, session):
+            self.session = session
+
+        async def list_user_devices(self, user_id):
+            assert user_id == 1
+            return [device]
+
+    monkeypatch.setattr(vpn_router_module, "VPNService", StubVPNService)
+    monkeypatch.setattr(vpn_router_module, "BillingService", StubBillingService)
+    monkeypatch.setattr(vpn_router_module, "DeviceAccessPolicyService", StubDevicePolicyService)
+
+    result = await vpn_router_module.get_or_provision_user_client(1, DummySession())
+
+    assert result == {"client_id": 99, "device_id": 21}

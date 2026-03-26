@@ -1,11 +1,20 @@
 """
 Admin API router for analytics and management.
 
-GRACE-lite module contract:
-- Exposes operational and business-facing admin endpoints.
-- This module is partly ahead and partly behind the data model migration:
-  some stats still reflect legacy VPN server concepts.
-- Admin routes should be treated as privileged surfaces, not generic internal CRUD.
+MODULE_CONTRACT
+- PURPOSE: Expose privileged admin analytics and system endpoints over current backend state.
+- SCOPE: Dashboard statistics, revenue analytics, user analytics, system health, and privileged operational visibility.
+- DEPENDS: M-001 auth and DB session injection, M-002 user models, M-003 vpn topology models, M-004 billing models, M-005 referral models, M-006 admin-api graph surface, M-016 route-policy observability dependencies.
+- LINKS: M-006 admin-api, M-016 route-decision-api, V-M-006.
+
+MODULE_MAP
+- get_admin_stats: Aggregates dashboard metrics across users, subscriptions, revenue, VPN, and routing visibility.
+- get_revenue_analytics: Returns grouped payment revenue analytics over a bounded date range.
+- get_users_analytics: Returns grouped user registration analytics over a bounded date range.
+- get_system_health: Returns coarse host health metrics for privileged operators.
+
+CHANGE_SUMMARY
+- 2026-03-24: Added route-aware admin statistics so dashboard reporting can surface node, route, rule, and DNS-binding state during routing migration.
 """
 # <!-- GRACE: module="M-006" api-group="Admin API" -->
 

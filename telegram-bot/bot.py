@@ -1,7 +1,13 @@
 """
 KrotVPN Telegram Bot.
+
+GRACE-lite module contract:
+- Provides a convenience channel over backend APIs, not a separate source of truth.
+- Bot auth ultimately depends on backend `/api/auth/telegram`.
+- User access tokens are stored in process memory only; restarts lose bot session state.
+- Bot changes should preserve parity with backend auth/subscription/config flows.
 """
-# <!-- GRACE: module="M-008" entry-point="EP-003" -->
+# <!-- GRACE: module="M-011" entry-point="EP-004" -->
 
 import asyncio
 import os

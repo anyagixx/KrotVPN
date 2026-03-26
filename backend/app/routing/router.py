@@ -1,7 +1,25 @@
 """
 Routing API router.
+
+MODULE_CONTRACT
+- PURPOSE: Expose admin-facing routing status, custom route management, policy CRUD, and route-decision inspection APIs.
+- SCOPE: Routing status reads, RU update trigger, legacy custom-route CRUD, domain/CIDR policy CRUD, DNS binding visibility, and decision explain endpoints.
+- DEPENDS: M-001 auth and DB session injection, M-007 routing runtime, M-013 route-policy-resolver, M-014 domain-rule-store, M-015 dns-observer, M-016 route-decision-api.
+- LINKS: M-007 routing, M-016 route-decision-api, V-M-007, V-M-016.
+
+MODULE_MAP
+- get_routing_status: Returns current routing status and last RU update timestamp.
+- update_ru_ips: Triggers RU ipset refresh through the routing manager.
+- list_custom_routes/create_custom_route/delete_custom_route: Maintain legacy custom-route state and sync it into runtime ipsets.
+- list_domain_route_rules/create_domain_route_rule/update_domain_route_rule/delete_domain_route_rule: Manage domain-based policy rules.
+- list_cidr_route_rules/create_cidr_route_rule/update_cidr_route_rule/delete_cidr_route_rule: Manage CIDR-based policy rules.
+- explain_route_decision: Returns effective route target, reason, and trace marker for an input address.
+- list_policy_dns_bindings: Returns active DNS-derived bindings used by policy decisions.
+
+CHANGE_SUMMARY
+- 2026-03-24: Expanded routing API to include policy CRUD, DNS binding visibility, and decision explainability for route-policy migration work.
 """
-# <!-- GRACE: module="M-007" api-group="Routing API" -->
+# <!-- GRACE: module="M-016" api-group="Routing API" -->
 
 import asyncio
 import socket

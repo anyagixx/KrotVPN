@@ -1,3 +1,20 @@
+"""
+MODULE_CONTRACT
+- PURPOSE: Verify admin-facing routing policy API behavior for CRUD-like creation, decision explanation, and DNS-binding visibility.
+- SCOPE: Response-shape assertions, admin dependency overrides, and deterministic decision evidence for route-policy endpoints.
+- DEPENDS: M-001 dependency overrides, M-014 domain-rule-store responses, M-016 route-decision-api.
+- LINKS: V-M-006, V-M-016.
+
+MODULE_MAP
+- _build_client: Constructs a FastAPI test client with admin and DB dependency overrides.
+- test_create_domain_route_rule_returns_created_rule: Verifies policy mutation response shape for created domain rules.
+- test_explain_route_decision_returns_reason_and_trace: Verifies decision explanation payload includes reason and trace marker.
+- test_list_policy_dns_bindings_exposes_active_bindings: Verifies active DNS bindings are exposed through the admin-facing policy API.
+
+CHANGE_SUMMARY
+- 2026-03-24: Added route decision API tests for policy creation, explainability, and DNS binding visibility.
+"""
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

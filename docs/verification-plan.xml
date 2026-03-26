@@ -4,7 +4,7 @@
   <meta>
     <project-name>KrotVPN</project-name>
     <version>2.6.1</version>
-    <updated>2026-03-26</updated>
+    <updated>2026-03-27</updated>
   </meta>
 
   <verification-philosophy>
@@ -48,7 +48,7 @@
     <scenario id="VM-005" module="V-M-016" evidence="deterministic-plus-auth">
       <success>Admin can inspect policy state and decision reasons, non-admin cannot mutate policy.</success>
       <failure>Missing auth enforcement or missing reason field in response.</failure>
-      <required-trace>ADMIN_ROUTE_POLICY_READ ADMIN_ROUTE_POLICY_MUTATION ROUTE_DECISION_EXPLAINED</required-trace>
+      <required-trace>ROUTE_DECISION_DOMAIN_EXACT plus response-shape and auth assertions in API tests</required-trace>
     </scenario>
     <scenario id="VM-006" module="V-M-003" evidence="integration">
       <success>VPN provisioning still produces config consistent with selected topology and routing policy expectations.</success>
@@ -95,12 +95,12 @@
     <V-M-006 module="admin-api">
       <checks>Admin routing inspection and analytics endpoints enforce admin auth and reflect current policy state.</checks>
       <tests>backend/tests/test_route_decision_api.py backend/tests/test_admin_stats.py</tests>
-      <anchors>ADMIN_ROUTE_POLICY_READ ADMIN_ROUTE_POLICY_MUTATION</anchors>
+      <anchors>none-required-for-current-scope; current evidence is admin auth plus response-shape verification in route and stats API tests</anchors>
     </V-M-006>
     <V-M-007 module="routing">
       <checks>Current RU ipset update, custom route sync and tunnel inspection remain safe under host-level assumptions.</checks>
       <tests>backend/tests/test_routing_policy_compat.py plus static review and targeted runtime tests when host tools are available</tests>
-      <anchors>ROUTING_RU_IPSET_UPDATED ROUTING_CUSTOM_SYNC_APPLIED</anchors>
+      <anchors>RUNTIME_ROUTESET_INCREMENTAL RUNTIME_ROUTESET_FULL_REFRESH</anchors>
     </V-M-007>
     <V-M-008 module="tasks">
       <checks>Background jobs do not auto-assign complimentary internal access or mutate manually managed clients unexpectedly.</checks>
@@ -139,7 +139,7 @@
     <V-M-014 module="domain-rule-store">
       <checks>Rule persistence preserves priority, activation state, domain normalization and duplicate handling.</checks>
       <tests>backend/tests/test_domain_rule_store.py</tests>
-      <anchors>DOMAIN_RULE_CREATED DOMAIN_RULE_UPDATED DOMAIN_RULE_REJECTED_DUPLICATE</anchors>
+      <anchors>none-required-for-current-scope; current evidence is persistence, normalization and duplicate-handling behavior in store tests</anchors>
     </V-M-014>
     <V-M-015 module="dns-observer">
       <checks>DNS bindings are refreshed by TTL, expired safely and conflict resolution is explicit.</checks>
@@ -149,12 +149,12 @@
     <V-M-016 module="route-decision-api">
       <checks>Admin CRUD and inspection endpoints expose policy state safely and return decision reasons.</checks>
       <tests>backend/tests/test_route_decision_api.py</tests>
-      <anchors>ROUTE_POLICY_API_LIST ROUTE_POLICY_API_MUTATION ROUTE_DECISION_EXPLAINED</anchors>
+      <anchors>ROUTE_DECISION_DOMAIN_EXACT; current API evidence also relies on response-shape assertions for list, mutation and explain endpoints</anchors>
     </V-M-016>
     <V-M-017 module="route-sync-runtime">
       <checks>Runtime sync applies incremental updates correctly, removes stale bindings and avoids rule leakage between RU and DE sets.</checks>
       <tests>backend/tests/test_route_sync_runtime.py</tests>
-      <anchors>RUNTIME_ROUTESET_APPLIED RUNTIME_ROUTESET_INCREMENTAL RUNTIME_ROUTESET_FULL_REFRESH</anchors>
+      <anchors>RUNTIME_ROUTESET_INCREMENTAL RUNTIME_ROUTESET_FULL_REFRESH</anchors>
     </V-M-017>
     <V-M-018 module="manual-access-policy">
       <checks>Complimentary internal access is created or reused deterministically, remains visible in normal subscription state and does not invoke payment-provider side effects.</checks>

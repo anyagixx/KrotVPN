@@ -14,6 +14,8 @@ NC='\033[0m'
 BACKEND_CONTAINER="${BACKEND_CONTAINER:-krotvpn-backend}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/amnezia/amneziawg/clients}"
 ACCESS_LABEL="${ACCESS_LABEL:-internal-unlimited}"
+VPN_INTERFACE="${VPN_INTERFACE:-awg0}"
+HOST_SYNC_SCRIPT="${HOST_SYNC_SCRIPT:-/usr/local/bin/krotvpn-sync-awg0.sh}"
 CLI_ARGS=()
 
 usage() {
@@ -90,6 +92,21 @@ docker exec "$BACKEND_CONTAINER" python -m app.cli create-internal-client \
 if [ ! -f "$OUTPUT_PATH" ]; then
     echo "Config file was not created: $OUTPUT_PATH"
     exit 1
+fi
+
+echo -e "${YELLOW}Applying host AWG sync for ${VPN_INTERFACE}...${NC}"
+if [ -x "$HOST_SYNC_SCRIPT" ]; then
+    "$HOST_SYNC_SCRIPT"
+else
+    TMP_SYNC_FILE="$(mktemp)"
+    cleanup_sync_file() {
+        rm -f "$TMP_SYNC_FILE"
+    }
+    trap cleanup_sync_file EXIT
+    awg-quick strip "$VPN_INTERFACE" > "$TMP_SYNC_FILE"
+    awg syncconf "$VPN_INTERFACE" "$TMP_SYNC_FILE"
+    cleanup_sync_file
+    trap - EXIT
 fi
 
 echo ""
